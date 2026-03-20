@@ -1,26 +1,36 @@
 # AmphetamineXL
 
-**Because Amphetamine keeps failing.**
+**Your Mac stays awake when the lid closes. Actually.**
 
-AmphetamineXL is a tiny macOS menu bar app that actually prevents your Mac from sleeping when you close the lid. One click. Works. No nonsense.
+AmphetamineXL is a tiny macOS menu bar app that prevents your MacBook from sleeping when you close the lid — even on Apple Silicon, even without an external display, even on iPhone hotspot. One click. Works. No nonsense.
 
 ## Why does this exist?
 
-Amphetamine only holds `PreventUserIdleSystemSleep` — which blocks idle sleep, but not clamshell (lid-close) sleep. AmphetamineXL holds **both** assertions, including `PreventSystemSleep`, which is what you actually need.
+On Apple Silicon Macs, closing the lid triggers a hardware-level "clamshell sleep" controlled by the SMC chip. This ignores:
+- IOKit assertions (`caffeinate`, Amphetamine, etc.)
+- `pmset` settings
+- Every software-only approach
 
-## ⚠️ Required: Disable macOS Standby
+AmphetamineXL solves this by posting synthetic mouse events via `CGEventCreateMouseEvent` every second. The SMC sees real HID (Human Interface Device) activity and won't enter clamshell sleep. This is the same technique used by Amphetamine's "Drive Alive" feature, reverse-engineered from their binary.
 
-**You must run this once in Terminal, or the app won't work reliably:**
+## What it does (multi-layer defense)
+
+| Layer | What | Why |
+|-------|------|-----|
+| 🖱️ CGEvent mouse jiggle | 1px move every 1s | Prevents clamshell sleep (the key fix) |
+| 🔒 IOKit assertions | 3 types held simultaneously | Prevents idle + system + display sleep |
+| ☕ caffeinate -s | Subprocess | Kernel-level sleep prevention |
+| 🌐 Network keepalive | 5 DNS targets, UDP+TCP every 3s | Keeps hotspot/Wi-Fi alive |
+
+## ⚠️ Required: Disable macOS Standby (one-time)
 
 ```bash
 sudo pmset -a standby 0 && sudo pmset -a hibernatemode 0 && sudo pmset -a autopoweroff 0
 ```
 
-**Why?** Apple Silicon Macs have a hardware-level "standby" state managed by the SMC chip that overrides ALL software sleep prevention — including IOKit assertions and even `caffeinate`. When you close the lid, the SMC can put the Mac into deep standby regardless of what any app tells it. This command disables that deep standby permanently. Normal sleep still works perfectly — your Mac will sleep/wake as usual when AmphetamineXL is off. You're only disabling the ultra-deep hibernate state.
+This disables Apple Silicon's deep standby state that overrides all software sleep prevention. Normal sleep still works when AmphetamineXL is off. Persists across reboots.
 
-This is a one-time command. It persists across reboots.
-
-To revert (re-enable standby): `sudo pmset -a standby 1 && sudo pmset -a hibernatemode 3`
+To revert: `sudo pmset -a standby 1 && sudo pmset -a hibernatemode 3`
 
 ## Install
 
@@ -38,6 +48,29 @@ To revert (re-enable standby): `sudo pmset -a standby 1 && sudo pmset -a hiberna
 - Click the icon → toggle caffeine on/off
 - Optional: enable "Launch at Login"
 
+## Known side-effects when caffeinated
+
+- Mac won't auto-lock (mouse jiggle counts as user activity)
+- Screen won't dim/sleep
+- Both are intentional for the "backpack mode" use case (lid is closed anyway)
+
+## Debugging
+
+View logs:
+```bash
+log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 10m
+```
+
+Check assertions:
+```bash
+pmset -g assertions | grep -E "AmphetamineXL|caffeinate|UserIsActive"
+```
+
+Check sleep/wake history:
+```bash
+pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20
+```
+
 ## Build from source
 
 ```bash
@@ -45,3 +78,11 @@ git clone https://github.com/HannoJacobs/AmphetamineXL
 cd AmphetamineXL
 xcodebuild -scheme AmphetamineXL -configuration Release -destination 'platform=macOS' build
 ```
+
+## How it was figured out
+
+Reverse-engineering Amphetamine's binary revealed their "Drive Alive" feature uses `CGEventCreateMouseEvent` + `CGEventPost` to simulate mouse movement. This is the only technique that prevents Apple Silicon clamshell sleep without an external display. Everything else (IOKit assertions, caffeinate, pmset) is supplementary.
+
+## License
+
+MIT

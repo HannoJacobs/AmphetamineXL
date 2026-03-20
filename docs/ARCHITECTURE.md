@@ -1,73 +1,153 @@
 # Architecture
 
-## ⚠️ The Standby Problem (read this first)
+## The Core Problem: Apple Silicon Clamshell Sleep
 
-Apple Silicon Macs have a hardware-level sleep state called **standby** managed by the SMC (System Management Controller). This is separate from regular sleep and operates *below* the OS layer — it bypasses ALL IOKit power assertions, including `PreventSystemSleep`, and even ignores `caffeinate`. When the lid closes, the SMC can decide to enter standby regardless of what software says.
+On Apple Silicon Macs, closing the lid triggers a **hardware-level clamshell sleep** controlled by the SMC (System Management Controller). This operates *below* the OS layer and **ignores all software sleep prevention**:
 
-**The fix:** Disable standby via `pmset`:
+- ❌ IOKit assertions (`PreventSystemSleep`, `PreventUserIdleSystemSleep`) — ignored
+- ❌ `caffeinate -s` — ignored
+- ❌ `pmset standby 0` — reduces but doesn't prevent
+- ❌ All of the above combined — still sleeps
+
+This is fundamentally different from Intel Macs where `caffeinate -s` was sufficient.
+
+## The Solution: CGEvent Mouse Jiggle (v2.0)
+
+The **only** thing the SMC respects during clamshell events is HID (Human Interface Device) activity. If the system sees active user input, it won't enter clamshell sleep.
+
+AmphetamineXL posts synthetic mouse events via CoreGraphics:
+
+```swift
+// Every 1 second:
+let currentPos = CGEvent(source: nil)?.location ?? CGPoint(x: 100, y: 100)
+let moved = CGPoint(x: currentPos.x + 1, y: currentPos.y)
+
+if let moveEvent = CGEvent(
+    mouseEventSource: nil,
+    mouseType: .mouseMoved,
+    mouseCursorPosition: moved,
+    mouseButton: .left
+) {
+    moveEvent.post(tap: .cghidEventTap)
+}
+// Then move back 0.05s later
+```
+
+This creates real HID events that WindowServer registers as `UserIsActive`:
+```
+WindowServer: UserIsActive named: "com.apple.iohideventsystem.queue.tickle.nxevent service:IOHIDSystem pid:XXXX process:AmphetamineXL"
+```
+
+### How This Was Discovered
+
+Reverse-engineering Amphetamine's binary with `nm`, `strings`, and `otool` revealed:
+- `CGEventCreateMouseEvent` / `CGEventPost` imports
+- `pSess_MoveMouse` / `MoveMouseInterval` / `MoveMouseSmoothSldr` properties
+- `isDisplayClosed` — lid state detection
+- "Drive Alive" — their feature name for the keepalive mechanism
+
+Amphetamine has been using this technique all along. It's not documented anywhere public.
+
+## Multi-Layer Defense Stack
+
+AmphetamineXL uses 5 simultaneous layers, but **only the first one actually prevents clamshell sleep**. The others are supplementary:
+
+| Layer | Interval | Purpose |
+|-------|----------|---------|
+| **CGEvent mouse jiggle** | 1s | **THE FIX** — prevents clamshell sleep via HID activity |
+| IOKit assertions (x3) | Always held | Prevents idle sleep, system sleep, display sleep |
+| caffeinate -s subprocess | Always running | Kernel-level sleep prevention (backup) |
+| Network keepalive | 3s | Keeps hotspot/Wi-Fi alive (5 DNS hosts, UDP + TCP) |
+| pmset overrides | System-level | Disables deep standby/hibernate |
+
+### IOKit Assertions Held
+
+| Assertion | What it blocks |
+|---|---|
+| `kIOPMAssertPreventUserIdleSystemSleep` | Idle timeout sleep |
+| `kIOPMAssertionTypePreventSystemSleep` | System sleep (lid close on Intel; ignored by SMC on Apple Silicon) |
+| `kIOPMAssertPreventUserIdleDisplaySleep` | Display dimming/sleep |
+
+### Network Keepalive
+
+Rotates through 5 DNS servers to keep network connections alive:
+- 1.1.1.1 (Cloudflare), 8.8.8.8 (Google), 9.9.9.9 (Quad9), 208.67.222.222 (OpenDNS), 1.0.0.1 (Cloudflare secondary)
+
+Each tick does:
+1. UDP DNS lookup via `getaddrinfo`
+2. Non-blocking TCP SYN to port 53 via `connect()`
+
+Varied targets prevent any single host from rate-limiting and make traffic patterns look natural.
+
+### pmset System Settings (one-time, requires sudo)
+
 ```bash
 sudo pmset -a standby 0 && sudo pmset -a hibernatemode 0 && sudo pmset -a autopoweroff 0
 ```
 
-This is a one-time system-level change. Normal sleep is unaffected — the Mac still sleeps/wakes normally. Only the deep hibernate state is disabled.
+## Logging
 
-To verify: `pmset -g | grep standby` should show `standby 0`.
+Full `os.log` integration:
+- **Subsystem:** `com.hannojacobs.AmphetamineXL`
+- **Category:** `SleepPrevention`
 
-Without this, AmphetamineXL (and any other caffeine app) will appear to work but will lose to the SMC on lid close.
-
-## Why Amphetamine fails
-
-Amphetamine holds `kIOPMAssertPreventUserIdleSystemSleep` — this only blocks **idle sleep** (Mac goes to sleep after inactivity). It does **not** block clamshell (lid-close) sleep.
-
-When you close your MacBook lid, macOS triggers a separate code path: `Clamshell Sleep`. This ignores idle-sleep assertions entirely.
-
-AmphetamineXL holds **both**:
-- `kIOPMAssertPreventUserIdleSystemSleep` — blocks idle sleep
-- `kIOPMAssertionTypePreventSystemSleep` — blocks clamshell/system sleep
-
-The second assertion is what actually keeps the Mac awake with the lid closed.
-
-## IOKit assertion lifecycle
-
-```swift
-// Enable
-IOPMAssertionCreateWithName(kIOPMAssertionTypePreventSystemSleep as CFString,
-    IOPMAssertionLevel(kIOPMAssertionLevelOn), reason, &assertionID)
-
-// Disable (must always be paired with create to avoid leaking)
-IOPMAssertionRelease(assertionID)
+```bash
+log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 10m
 ```
 
-Assertion IDs are stored as `IOPMAssertionID` properties on `AppState`. If the app crashes without releasing, macOS cleans them up automatically when the process exits.
+Events logged:
+- 🚀 App init
+- ⚡ Caffeine enable/disable with assertion results
+- 🛑 `willSleep` — CRITICAL, means the jiggle failed
+- 🟢 `didWake` — restarts all timers
+- 🖥️ `screensDidSleep` / `screensDidWake` — display/lid events
+- 🖱️ Jiggle count every 60 ticks (~1 min)
+- 🌐 Keepalive count every 100 ticks (~5 min)
+- ☕ caffeinate start/stop/death detection
+
+## Sleep/Wake Notification Handling
+
+Registers for 4 notifications via `NSWorkspace.shared.notificationCenter`:
+
+| Notification | Handler |
+|---|---|
+| `willSleepNotification` | Posts last-ditch mouse event, logs CRITICAL |
+| `didWakeNotification` | Restarts all timers, checks if caffeinate died |
+| `screensDidSleepNotification` | Logs display off (lid close or manual) |
+| `screensDidWakeNotification` | Logs display on (lid open) |
 
 ## AppState (@Observable)
 
 `AppState` is the single source of truth. Uses `@Observable` macro (macOS 14+):
 - `isActive: Bool` — is caffeine on?
 - `activeSince: Date?` — when it was turned on
-- `durationText: String` — human-readable "Active for Xh Ym" updated every 60s via `Timer`
+- `durationText: String` — "Active for Xh Ym" updated every 60s
 - `menuBarIcon: String` — SF Symbol name driven by `isActive`
+- `mouseJiggleCount: Int` — tracking for logs
+- `keepaliveCount: Int` — tracking for logs
 
-State is persisted to `UserDefaults` under key `amphetamine_active`. On init, if saved state is `true`, caffeine is re-enabled automatically.
+State persisted to `UserDefaults` under key `amphetamine_active`. On init, if saved state is `true` (or key not yet set), caffeine is re-enabled automatically. Default is ON.
 
-## MenuBarExtra + SwiftUI gotcha
+## MenuBarExtra + SwiftUI Gotcha
 
-AmphetamineXL uses `MenuBarExtra` with `.window` style (a floating NSPanel, not a native menu). This has a quirk: SwiftUI `Button` inside `.window` style can **dismiss the panel before the action fires**.
+Uses `MenuBarExtra` with `.window` style. SwiftUI `Button` inside `.window` style **dismisses the panel before the action fires**.
 
-**Solution**: use `HStack + .contentShape(Rectangle()) + .onTapGesture` for all interactive rows. This gives a full-width hit target that fires reliably. See `MenuBarView.swift`.
+**Solution**: `HStack + .contentShape(Rectangle()) + .onTapGesture` for all interactive rows.
 
-## Build system
+## Build System
 
-No Xcode project file. Pure Swift Package Manager. xcodebuild resolves the SPM manifest automatically:
+Pure Swift Package Manager. No Xcode project file.
 
 ```bash
 xcodebuild -scheme AmphetamineXL -configuration Release -destination 'platform=macOS' build
 ```
 
-The binary ends up in `~/Library/Developer/Xcode/DerivedData/AmphetamineXL-*/Build/Products/Release/AmphetamineXL`.
+Binary: `~/Library/Developer/Xcode/DerivedData/AmphetamineXL-*/Build/Products/Release/AmphetamineXL`
 
-## Release / packaging
+## Known Side-Effects When Caffeinated
 
-`create-dmg.sh` finds the binary in DerivedData, wraps it in a `.app` bundle with a hand-crafted `Info.plist`, and packages it into a DMG with an Applications symlink. Version is hardcoded in the script — bump both `CFBundleVersion` and `CFBundleShortVersionString` on each release.
+- Mac won't auto-lock (mouse jiggle = user activity)
+- Screen won't dim
+- Both intentional for "backpack mode" (lid is closed anyway)
 
-CI (`.github/workflows/release.yml`) runs on every push to `main`: builds release binary, runs `create-dmg.sh`, uploads to the latest GitHub release.
+**Future fix:** Only jiggle when `screensDidSleep` has fired (display off / lid closed), stop on `screensDidWake`. Would allow auto-lock when lid is open.

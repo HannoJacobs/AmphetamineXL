@@ -1,123 +1,85 @@
-# AmphetamineXL — Lid-Close Sleep Handoff
+# AmphetamineXL — Handoff Document
 
-**Date:** 2026-03-20  
-**Status:** Mac still sleeping on lid close despite all mitigations. Need root fix.
+**Date:** 2026-03-20
+**Status:** ✅ WORKING — v2.0 confirmed. Mac stays awake with lid closed, no external display, on iPhone hotspot.
 
 ---
 
-## What We Built
+## What It Is
 
-AmphetamineXL — a menu bar app that prevents Mac sleep when lid is closed. Lives at:
+AmphetamineXL — a macOS menu bar app that prevents Mac sleep when lid is closed.
 - Repo: `/Users/hannojacobs/Documents/Code/AmphetamineXL`
 - GitHub: https://github.com/HannoJacobs/AmphetamineXL
 - Installed: `/Applications/AmphetamineXL.app`
-- Current version: v1.4
+- Current version: v2.0
 
-## The Core Problem
+## The Problem (solved)
 
-MacBook (Apple Silicon, ~2 years old) goes to **Clamshell Sleep** every time the lid closes, even with all sleep prevention active. This drops the iPhone Personal Hotspot connection.
+MacBook (Apple Silicon) goes to Clamshell Sleep when lid closes, dropping iPhone hotspot. Need "backpack mode" — close lid, put in bag, everything stays connected.
 
-**Current config:**
-- `standby = 0` (disabled via sudo pmset)
-- `hibernatemode = 0`
-- `autopoweroff = 0`
-- AmphetamineXL holding 3 IOKit assertions
-- `caffeinate -s` subprocess running
-- Ping to `172.20.10.1` (iPhone hotspot gateway) every 2s
-- Ping to `1.1.1.1` every 3s
+## The Solution
 
-**Still sleeping.** Every lid close triggers ~15 second Clamshell Sleep, then it wakes itself up.
+**CGEvent mouse jiggle** — the only technique that prevents Apple Silicon clamshell sleep without an external display.
 
----
+Every 1 second, the app posts `CGEventCreateMouseEvent(.mouseMoved)` to move the cursor 1px right then back. WindowServer registers this as `UserIsActive` HID activity. The SMC respects HID activity and won't enter clamshell sleep.
 
-## Everything We Tried (in order)
+**Discovery:** Reverse-engineered from Amphetamine's binary using `nm`, `strings`, and `otool`. Key symbols found:
+- `CGEventCreateMouseEvent` / `CGEventPost` (imports)
+- `pSess_MoveMouse` / `MoveMouseInterval` (properties)
+- "Drive Alive" (their feature name)
 
-### 1. IOKit assertions only
-Held `kIOPMAssertPreventUserIdleSystemSleep` + `kIOPMAssertionTypePreventSystemSleep` + `kIOPMAssertPreventUserIdleDisplaySleep`.  
-**Result:** Still slept. `PreventSystemSleep` shows `0` system-wide even when held.
+## Full Defense Stack (all active simultaneously)
 
-### 2. caffeinate -s subprocess
-Spawned `/usr/bin/caffeinate -s` as a child process of AmphetamineXL.  
-**Result:** Still slept. SMC overrides it.
+1. **CGEvent mouse jiggle** — 1px move every 1s (THE fix)
+2. **IOKit assertions** — PreventUserIdleSystemSleep + PreventSystemSleep + PreventUserIdleDisplaySleep
+3. **caffeinate -s subprocess** — kernel-level sleep prevention
+4. **Network keepalive** — rotates 5 DNS servers (Cloudflare, Google, Quad9, OpenDNS, Cloudflare secondary), UDP DNS lookup + TCP SYN probe every 3s
+5. **pmset overrides** — standby 0, hibernatemode 0, autopoweroff 0
 
-### 3. Disable standby via pmset
+## Logging
+
+Full `os.log` logging added. Subsystem: `com.hannojacobs.AmphetamineXL`, category: `SleepPrevention`.
+
 ```bash
-sudo pmset -a standby 0 && sudo pmset -a hibernatemode 0 && sudo pmset -a autopoweroff 0
-```
-**Result:** Standby shows 0, but Mac STILL enters Clamshell Sleep for ~15 seconds then self-wakes.
+# View all app logs
+log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 10m
 
-### 4. Network keepalive pings
-Background pings to iPhone gateway + Cloudflare DNS.  
-**Result:** Reduces hotspot drop probability but doesn't prevent the sleep.
+# Check assertions
+pmset -g assertions | grep -E "AmphetamineXL|caffeinate|UserIsActive"
 
----
-
-## What the Logs Show
-
-Check logs with:
-```bash
+# Check sleep/wake history
 pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20
 ```
 
-Pattern every time:
-```
-Entering Sleep state due to 'Clamshell Sleep':TCPKeepAlive=active Using Batt (Charge:XX%)
-Wake from Deep Idle [CDNVA] : due to smc.sysState.Wake(0x70070000) lid SMC.OutboxNotEmpty/HID Activity
-```
+Logs include:
+- App init and assertion creation (with success/failure)
+- Sleep/wake/display notifications
+- Jiggle count every 60 ticks (~1 min)
+- Keepalive count every 100 ticks (~5 min)
+- caffeinate subprocess status
 
-The `smc.sysState.Wake` means the **SMC itself is forcing the sleep AND the wake**. This is hardware-level, not software. The Mac sleeps for ~15s then wakes because the IOKit assertions eventually kick back in — but there's always that initial sleep window.
+## What We Tried That Didn't Work (for posterity)
 
-Check current assertions:
-```bash
-pmset -g assertions | grep -E "AmphetamineXL|caffeinate|PreventSystem"
-```
+1. **IOKit assertions only** → SMC ignores them for clamshell sleep
+2. **caffeinate -s** → SMC overrides it
+3. **pmset standby 0** → Still enters Clamshell Sleep for ~15s then self-wakes
+4. **Network pings only** → Doesn't prevent sleep, just helps hotspot stay connected after wake
+5. **All of the above combined** → Still slept. Only the CGEvent mouse jiggle fixed it.
 
-Check if caffeinate is alive:
-```bash
-pgrep -x caffeinate
-```
+## Root Cause (documented)
 
----
+On Apple Silicon with no external display, lid-close is a hardware event handled by the SMC. The SMC ignores all software sleep assertions. The ONLY thing it respects is HID (Human Interface Device) activity — which is what CGEventCreateMouseEvent provides.
 
-## Root Cause (confirmed)
+This is fundamentally different from Intel Macs where `caffeinate -s` was sufficient.
 
-On Apple Silicon with **no external display connected**, macOS treats lid-close as a mandatory hardware event. The SMC forces a brief clamshell sleep regardless of software assertions. This is different from Intel Macs where `caffeinate -s` was sufficient.
+## Known Side-Effects
 
-**IOKit assertions are NOT enough.** The SMC ignores them for clamshell sleep.
+- Mac won't auto-lock while caffeinated (mouse jiggle = user activity)
+- Screen won't dim while caffeinated
+- Both intentional for backpack mode (lid is closed)
 
-## Fix Applied (v1.4 → commit 5a477c0)
+## Future Improvements (not yet implemented)
 
-**CGEvent mouse jiggle** — reverse-engineered from Amphetamine's binary. Every 4 seconds, the app posts a `CGEventCreateMouseEvent(.mouseMoved)` that moves the cursor 1px right then back. This creates real HID events that register as `UserIsActive` with WindowServer. The SMC respects HID activity and won't enter clamshell sleep.
-
-Evidence from `pmset -g assertions`:
-```
-WindowServer: UserIsActive named: "com.apple.iohideventsystem.queue.tickle.nxevent service:IOHIDSystem pid:XXXX process:AmphetamineXL"
-```
-
-**Needs real-world testing:** Close lid, put in backpack, check if hotspot stays connected without the ~15s sleep gap.
-
----
-
-## AmphetamineXL App State
-
-The app itself is working correctly:
-- Caffeinated by default on launch
-- Holds all 3 IOKit assertions
-- Spawns caffeinate subprocess
-- Network keepalive every 5s
-- Persists state across restarts
-- `pgrep -x AmphetamineXL` to verify running
-
-## What Hanno Wants
-
-**Goal:** Close MacBook lid → put it in backpack → iPhone hotspot stays connected → agents keep running → open lid later and everything still works.
-
-Use case: gym sessions, car travel. Mac is the brain, iPhone is the hotspot. No external display.
-
----
-
-## Restart Prompt for Next Session
-
-Copy-paste this to start fresh:
-
-> Read `/Users/hannojacobs/Documents/Code/AmphetamineXL/HANDOFF.md` — we built AmphetamineXL (menu bar caffeine app) but the Mac still sleeps briefly on lid close due to Apple Silicon SMC clamshell behaviour. Everything we tried is documented there including log commands. Continue the investigation and fix the lid-close sleep. The app is installed and running at `/Applications/AmphetamineXL.app`. The repo is at `/Users/hannojacobs/Documents/Code/AmphetamineXL`.
+- Only jiggle when display is off / lid is closed (detect via `screensDidSleep` notification) — would allow auto-lock when lid is open
+- Privileged helper to set/unset `disablesleep` via pmset (like Amphetamine's `installPowerProtectSudoOverride`)
+- Battery safeguard — auto-disable caffeine below X% battery

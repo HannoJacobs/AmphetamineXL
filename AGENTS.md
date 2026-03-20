@@ -161,9 +161,12 @@ gh release view vX.Y           # confirm release exists and has AmphetamineXL.dm
 
 ### AppState.swift
 - `@Observable @MainActor` — SwiftUI Observation framework (macOS 14+)
-- Holds **two** IOKit assertions simultaneously:
-  - `kIOPMAssertPreventUserIdleSystemSleep` — prevents idle sleep (what most tools use)
-  - `kIOPMAssertionTypePreventSystemSleep` — prevents ALL system sleep, including clamshell lid close
+- Holds **three** IOKit assertions: PreventUserIdleSystemSleep, PreventSystemSleep, PreventUserIdleDisplaySleep
+- **CGEvent mouse jiggle** — posts `CGEventCreateMouseEvent(.mouseMoved)` every 1s (the clamshell fix)
+- **caffeinate -s** subprocess for kernel-level sleep prevention
+- **Network keepalive** — rotates 5 DNS hosts with UDP + TCP probes every 3s
+- **os.log logging** — subsystem `com.hannojacobs.AmphetamineXL`
+- **Sleep/wake notifications** — registers for willSleep, didWake, screensDidSleep, screensDidWake
 - State persisted via `UserDefaults` key `"amphetamine_active"` — restored on next launch
 - Duration timer fires every 60s on `RunLoop.main` with `.common` mode so it works during scroll
 
@@ -188,14 +191,43 @@ gh release view vX.Y           # confirm release exists and has AmphetamineXL.dm
 
 ---
 
-## IOKit — Why Two Assertions
+## How Sleep Prevention Actually Works (v2.0)
+
+### The Real Fix: CGEvent Mouse Jiggle
+
+On Apple Silicon, **IOKit assertions are NOT enough** for clamshell sleep. The SMC ignores them. The only thing the SMC respects is HID (Human Interface Device) activity.
+
+AmphetamineXL posts `CGEventCreateMouseEvent(.mouseMoved)` every 1 second, moving the cursor 1px right then back. WindowServer registers this as `UserIsActive`. The SMC sees HID activity and won't enter clamshell sleep.
+
+This was reverse-engineered from Amphetamine's binary — they call it "Drive Alive".
+
+### Multi-Layer Defense Stack
+
+| Layer | Interval | What it prevents |
+|-------|----------|-----------------|
+| CGEvent mouse jiggle | 1s | Clamshell sleep (THE key fix) |
+| IOKit assertions (x3) | Always held | Idle sleep, system sleep, display sleep |
+| caffeinate -s subprocess | Always running | Kernel-level sleep prevention |
+| Network keepalive (5 DNS hosts) | 3s | Hotspot/Wi-Fi connection drops |
+| pmset overrides | System-level | Deep standby/hibernate |
+
+### IOKit Assertions Held
 
 | Assertion | What it blocks |
 |---|---|
-| `kIOPMAssertPreventUserIdleSystemSleep` | Idle timeout sleep only |
-| `kIOPMAssertionTypePreventSystemSleep` | All system sleep — including lid close |
+| `kIOPMAssertPreventUserIdleSystemSleep` | Idle timeout sleep |
+| `kIOPMAssertionTypePreventSystemSleep` | System sleep (including lid close — but SMC ignores this on Apple Silicon) |
+| `kIOPMAssertPreventUserIdleDisplaySleep` | Display sleep |
 
-Amphetamine and most tools only hold the first. Closing the lid triggers the second type of sleep event. AmphetamineXL holds both, which is the core differentiator.
+### Logging
+
+Subsystem: `com.hannojacobs.AmphetamineXL`, category: `SleepPrevention`
+
+```bash
+log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 10m
+```
+
+Logs: init, assertion results, sleep/wake notifications, jiggle count (every 60s), keepalive count (every 5min).
 
 ---
 
