@@ -137,7 +137,7 @@ final class AppState {
                 // Lightweight DNS lookup — barely any data, just enough to show activity
                 var hints = addrinfo()
                 hints.ai_family = AF_INET
-                hints.ai_socktype = Int32(SOCK_DGRAM.rawValue)
+                hints.ai_socktype = Int32(SOCK_DGRAM)
                 var res: UnsafeMutablePointer<addrinfo>?
                 getaddrinfo("1.1.1.1", nil, &hints, &res)
                 if res != nil { freeaddrinfo(res) }
