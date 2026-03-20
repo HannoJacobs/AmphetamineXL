@@ -1,0 +1,137 @@
+---
+description: Full send deployment checklist for AmphetamineXL. Trigger when user says "full send", "deploy", or "fully deploy".
+globs:
+alwaysApply: false
+---
+
+# Full Send — AmphetamineXL Deploy Checklist
+
+When the user says "full send", "deploy this", or "fully deploy", execute every step below in order. Do not skip steps. Do not mark done until `pgrep` and `gh release view` both pass.
+
+---
+
+## Pre-flight
+
+- Confirm the new version number (e.g. `v1.1`)
+- Confirm a one-line release description
+
+---
+
+## Step 1 — Bump version in create-dmg.sh
+
+Open `create-dmg.sh` and update both version strings in the inline `Info.plist` block:
+
+```xml
+<key>CFBundleVersion</key>
+<string>X.Y</string>
+<key>CFBundleShortVersionString</key>
+<string>X.Y</string>
+```
+
+---
+
+## Step 2 — Update CHANGELOG.md
+
+Add a new entry at the top of `CHANGELOG.md`:
+
+```markdown
+## vX.Y — YYYY-MM-DD
+- <change 1>
+- <change 2>
+```
+
+---
+
+## Step 3 — Commit
+
+Stage and commit all changes:
+
+```bash
+git add create-dmg.sh CHANGELOG.md <any other changed files>
+git commit -m "vX.Y: <short description>"
+```
+
+---
+
+## Step 4 — Create GitHub release BEFORE pushing
+
+CI uploads the DMG to the most recent release. Create it first:
+
+```bash
+gh release create vX.Y \
+  --title "vX.Y — <title>" \
+  --notes "- Change one\n- Change two"
+```
+
+Verify it exists:
+
+```bash
+gh release view vX.Y
+```
+
+---
+
+## Step 5 — Push to main (triggers CI)
+
+```bash
+git push origin main
+```
+
+CI workflow (`.github/workflows/release.yml`) will:
+1. Build the Release binary via `xcodebuild`
+2. Run `create-dmg.sh` to package it
+3. Upload `AmphetamineXL.dmg` to the latest GitHub release
+
+Watch CI: `gh run watch` or check GitHub Actions tab.
+
+---
+
+## Step 6 — Build locally and install
+
+Build:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcodebuild -scheme AmphetamineXL -configuration Release \
+  -destination "platform=macOS" build
+```
+
+Find binary and install:
+
+```bash
+BINARY=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Release/AmphetamineXL" -type f 2>/dev/null | head -1)
+echo "Binary: $BINARY"
+
+pkill -x AmphetamineXL 2>/dev/null || true
+sleep 1
+
+cp "$BINARY" /Applications/AmphetamineXL.app/Contents/MacOS/AmphetamineXL
+
+# Update Info.plist to match new version
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion X.Y" /Applications/AmphetamineXL.app/Contents/Info.plist
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString X.Y" /Applications/AmphetamineXL.app/Contents/Info.plist
+
+open /Applications/AmphetamineXL.app
+```
+
+---
+
+## Step 7 — Verify (required — do not skip)
+
+```bash
+pgrep -x AmphetamineXL   # Must print a PID
+gh release view vX.Y      # Must show AmphetamineXL.dmg as an asset
+```
+
+Both checks must pass. Show the output to the user.
+
+---
+
+## Common Failures
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| CI upload fails | Release didn't exist when push happened | Create release first, then push |
+| App doesn't launch | Binary not signed or quarantine flag | `xattr -dr com.apple.quarantine /Applications/AmphetamineXL.app` |
+| `pgrep` returns nothing | Binary crashed on launch | Check Console.app for crash logs |
+| Wrong version shown | Info.plist not updated | Run PlistBuddy commands from Step 6 |
