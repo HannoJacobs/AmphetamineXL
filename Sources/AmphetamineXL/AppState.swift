@@ -245,19 +245,30 @@ final class AppState {
     // MARK: - Screen lock (locks on lid close so nobody can snoop)
 
     private func lockScreen() {
-        logger.notice("🔒 Locking screen via ScreenSaverEngine")
-        // Launch the screen saver — this triggers the lock screen if
-        // "Require password after sleep or screen saver" is enabled
-        // in System Settings (on by default). Works without special
-        // entitlements or accessibility permissions.
+        logger.notice("🔒 Locking screen via ScreenSaverEngine + display sleep")
+        // 1. Launch screen saver to trigger the lock
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         task.arguments = ["-a", "ScreenSaverEngine"]
         do {
             try task.run()
-            logger.notice("🔒 ScreenSaverEngine launched — screen will lock")
+            logger.notice("🔒 ScreenSaverEngine launched")
         } catch {
             logger.error("❌ Failed to launch ScreenSaverEngine: \(error.localizedDescription)")
+        }
+
+        // 2. After a brief delay (let screensaver register the lock),
+        //    force the display off so no backlight/pixels are burning
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            let sleepTask = Process()
+            sleepTask.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+            sleepTask.arguments = ["displaysleepnow"]
+            do {
+                try sleepTask.run()
+                logger.notice("🖥️ Display forced off via pmset displaysleepnow")
+            } catch {
+                logger.warning("⚠️ pmset displaysleepnow failed: \(error.localizedDescription)")
+            }
         }
     }
 
