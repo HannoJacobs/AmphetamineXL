@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AmphetamineXL - Caffeine toggle that actually works</title>
+  <title>AmphetamineXL — Keep your Mac awake with the lid closed</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -15,14 +15,18 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
       padding: 2rem;
     }
 
     .container {
-      max-width: 580px;
+      max-width: 620px;
       width: 100%;
+    }
+
+    .hero {
       text-align: center;
+      margin-bottom: 3rem;
+      padding-top: 2rem;
     }
 
     .badge {
@@ -116,16 +120,16 @@
       line-height: 1.5;
     }
 
-    .install-steps {
+    .section {
       background: #141414;
       border: 1px solid #1f1f1f;
       border-radius: 12px;
       padding: 1.4rem 1.6rem;
       text-align: left;
-      margin-bottom: 2.5rem;
+      margin-bottom: 1.5rem;
     }
 
-    .install-steps h2 {
+    .section h2 {
       font-size: 0.8rem;
       font-weight: 600;
       color: #555;
@@ -134,12 +138,12 @@
       margin-bottom: 1rem;
     }
 
-    .install-steps ol {
+    .section ol, .section ul {
       list-style: none;
       counter-reset: steps;
     }
 
-    .install-steps li {
+    .section ol li {
       counter-increment: steps;
       display: flex;
       align-items: flex-start;
@@ -150,9 +154,9 @@
       padding: 0.4rem 0;
     }
 
-    .install-steps li > span { flex: 1; min-width: 0; }
+    .section ol li > span { flex: 1; min-width: 0; }
 
-    .install-steps li::before {
+    .section ol li::before {
       content: counter(steps);
       background: #222;
       border: 1px solid #2a2a2a;
@@ -169,9 +173,101 @@
       margin-top: 0.05rem;
     }
 
+    .section ul li {
+      font-size: 0.875rem;
+      color: #bbb;
+      line-height: 1.5;
+      padding: 0.3rem 0;
+      padding-left: 1rem;
+      position: relative;
+    }
+
+    .section ul li::before {
+      content: "·";
+      position: absolute;
+      left: 0;
+      color: #555;
+      font-weight: bold;
+    }
+
+    code, .code-block {
+      background: #1a1a1a;
+      border-radius: 4px;
+      font-size: 0.82em;
+      font-family: "SF Mono", "Menlo", monospace;
+    }
+
+    code {
+      padding: 0.15em 0.4em;
+    }
+
+    .code-block {
+      display: block;
+      padding: 0.8rem 1rem;
+      margin: 0.6rem 0;
+      overflow-x: auto;
+      color: #ccc;
+      border: 1px solid #222;
+      position: relative;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+
+    .code-block:hover { border-color: #444; }
+
+    .code-block::after {
+      content: "click to copy";
+      position: absolute;
+      right: 0.6rem;
+      top: 0.5rem;
+      font-size: 0.65rem;
+      color: #444;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .code-block.copied::after {
+      content: "copied ✓";
+      color: #4a4;
+    }
+
+    .how-it-works {
+      margin-bottom: 1.5rem;
+    }
+
+    .how-it-works p {
+      font-size: 0.875rem;
+      color: #888;
+      line-height: 1.6;
+      margin-bottom: 0.8rem;
+    }
+
+    .defense-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+      margin-top: 0.5rem;
+    }
+
+    .defense-table th {
+      text-align: left;
+      color: #666;
+      font-weight: 600;
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid #222;
+    }
+
+    .defense-table td {
+      color: #aaa;
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid #1a1a1a;
+    }
+
     .footer {
+      text-align: center;
       font-size: 0.78rem;
       color: #444;
+      margin-top: 1rem;
     }
 
     .footer a { color: #666; text-decoration: none; }
@@ -185,69 +281,133 @@
 <body>
   <div class="container">
 
-    <div class="badge">macOS 14+ &nbsp;·&nbsp; Apple Silicon</div>
+    <div class="hero">
+      <div class="badge">macOS 14+ &nbsp;·&nbsp; Apple Silicon &nbsp;·&nbsp; Free</div>
 
-    <h1>⚡ AmphetamineXL</h1>
+      <h1>⚡ AmphetamineXL</h1>
 
-    <p class="tagline">
-      One click. Lid closed. Still awake.<br>
-      The caffeine toggle that actually prevents clamshell sleep.<br>
-      <span style="color:#555;font-size:0.95em">Because Amphetamine keeps failing.</span>
-    </p>
+      <p class="tagline">
+        Close the lid. Put it in your backpack.<br>
+        Your Mac stays awake. Hotspot stays connected.<br>
+        <span style="color:#555;font-size:0.95em">The only app that actually prevents Apple Silicon clamshell sleep.</span>
+      </p>
 
-    <a class="download-btn" href="https://github.com/HannoJacobs/AmphetamineXL/releases/latest/download/AmphetamineXL.dmg">
-      <svg viewBox="0 0 20 20" fill="currentColor">
-        <path d="M10 2a1 1 0 011 1v9.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L9 12.586V3a1 1 0 011-1z"/>
-        <path d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/>
-      </svg>
-      Download for Mac
-    </a>
+      <a class="download-btn" href="https://github.com/HannoJacobs/AmphetamineXL/releases/latest/download/AmphetamineXL.dmg">
+        <svg viewBox="0 0 20 20" fill="currentColor">
+          <path d="M10 2a1 1 0 011 1v9.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L9 12.586V3a1 1 0 011-1z"/>
+          <path d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/>
+        </svg>
+        Download for Mac
+      </a>
 
-    <p class="sub">Free &amp; open source &nbsp;·&nbsp; <span id="release-version">v1.0</span> &nbsp;·&nbsp; &lt;1 MB</p>
+      <p class="sub">Open source &nbsp;·&nbsp; <span id="release-version">v2.1</span> &nbsp;·&nbsp; &lt;1 MB</p>
+    </div>
 
     <div class="features">
       <div class="feature">
-        <div class="feature-icon">💊</div>
+        <div class="feature-icon">🖱️</div>
         <h3>Actually works</h3>
-        <p>Holds <code style="font-size:0.8em;background:#1a1a1a;padding:0.1em 0.3em;border-radius:3px">PreventSystemSleep</code> — the assertion that blocks lid-close sleep, not just idle sleep.</p>
+        <p>Uses synthetic HID events (CGEvent mouse movement) — the only technique Apple Silicon's SMC respects for clamshell sleep prevention.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">⚡</div>
-        <h3>One click</h3>
-        <p>Click the menu bar icon to toggle. Green bolt = caffeinated. Slash = sleeping. Shows how long it's been active.</p>
+        <div class="feature-icon">🔒</div>
+        <h3>Auto-locks on close</h3>
+        <p>Screen locks and display turns off when you close the lid. Open it up — password prompt. Your stuff is safe.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">🚀</div>
-        <h3>Launch at login</h3>
-        <p>Enable once and forget about it. Remembers your last state across restarts.</p>
+        <div class="feature-icon">🌐</div>
+        <h3>Keeps hotspot alive</h3>
+        <p>Network keepalive pings 5 DNS servers every 3 seconds. Your iPhone hotspot won't drop.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">🪶</div>
-        <h3>Tiny &amp; native</h3>
-        <p>Pure Swift, IOKit directly. No subprocess, no shell commands, no background agents. Under 1 MB.</p>
+        <div class="feature-icon">🧠</div>
+        <h3>Smart lid detection</h3>
+        <p>Only activates clamshell defense when lid is closed. Screen dims and locks normally when open.</p>
       </div>
     </div>
 
-    <div class="install-steps">
-      <h2>Getting started</h2>
+    <div class="section">
+      <h2>Install</h2>
       <ol>
-        <li><span>Open the DMG and drag AmphetamineXL to Applications</span></li>
-        <li><span>Open Terminal and run: <code style="background:#1a1a1a;padding:0.1em 0.4em;border-radius:4px;font-size:0.85em">xattr -cr /Applications/AmphetamineXL.app</code></span></li>
-        <li><span>Open AmphetamineXL from Applications</span></li>
-        <li><span>Click the ⚡ icon in your menu bar to enable caffeine</span></li>
-        <li><span>Close your lid — your Mac stays awake</span></li>
+        <li><span>Download the DMG above and drag AmphetamineXL to Applications</span></li>
+        <li><span>Clear the quarantine flag (macOS blocks unsigned apps):</span></li>
+      </ol>
+      <div class="code-block" onclick="copyCode(this)">xattr -cr /Applications/AmphetamineXL.app</div>
+      <ol start="3">
+        <li><span>Open AmphetamineXL — ⚡ appears in your menu bar</span></li>
+        <li><span><strong>Required one-time setup</strong> — disable Apple Silicon deep standby:</span></li>
+      </ol>
+      <div class="code-block" onclick="copyCode(this)">sudo pmset -a standby 0 && sudo pmset -a hibernatemode 0 && sudo pmset -a autopoweroff 0</div>
+      <ol start="5">
+        <li><span>Close your lid — Mac stays awake ✅</span></li>
       </ol>
     </div>
 
+    <div class="section">
+      <h2>Verify it's working</h2>
+      <p style="font-size:0.85rem;color:#888;margin-bottom:0.6rem">Run these to confirm everything is active:</p>
+      <div class="code-block" onclick="copyCode(this)">pgrep -x AmphetamineXL && echo "✅ App running" || echo "❌ Not running"</div>
+      <div class="code-block" onclick="copyCode(this)">pmset -g assertions | grep -E "AmphetamineXL|caffeinate|UserIsActive"</div>
+      <div class="code-block" onclick="copyCode(this)">pmset -g | grep -E "standby|hibernatemode|autopoweroff"</div>
+    </div>
+
+    <div class="section">
+      <h2>Debugging</h2>
+      <p style="font-size:0.85rem;color:#888;margin-bottom:0.6rem">View the app's detailed logs:</p>
+      <div class="code-block" onclick="copyCode(this)">log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 10m</div>
+      <p style="font-size:0.85rem;color:#888;margin-bottom:0.6rem;margin-top:0.8rem">Check sleep/wake history:</p>
+      <div class="code-block" onclick="copyCode(this)">pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20</div>
+      <p style="font-size:0.85rem;color:#888;margin-bottom:0.6rem;margin-top:0.8rem">Revert standby settings (re-enable deep sleep):</p>
+      <div class="code-block" onclick="copyCode(this)">sudo pmset -a standby 1 && sudo pmset -a hibernatemode 3 && sudo pmset -a autopoweroff 1</div>
+    </div>
+
+    <div class="section how-it-works">
+      <h2>How it works</h2>
+      <p>
+        On Apple Silicon Macs, closing the lid triggers a hardware-level "clamshell sleep" controlled by the SMC chip.
+        This <strong>ignores all software sleep prevention</strong> — IOKit assertions, <code>caffeinate</code>, <code>pmset</code>, everything.
+      </p>
+      <p>
+        The only thing the SMC respects is <strong>HID activity</strong> (Human Interface Device — mouse, keyboard, etc).
+        AmphetamineXL posts synthetic mouse events via <code>CGEventCreateMouseEvent</code> every second.
+        The SMC sees real input activity and won't enter clamshell sleep.
+      </p>
+      <p style="color:#555">
+        This technique was reverse-engineered from Amphetamine's binary — they call it "Drive Alive".
+      </p>
+
+      <table class="defense-table">
+        <tr><th>Layer</th><th>Interval</th><th>Purpose</th></tr>
+        <tr><td>🖱️ Mouse jiggle</td><td>1s</td><td>Prevents clamshell sleep (the key fix)</td></tr>
+        <tr><td>🔒 IOKit assertions</td><td>Always</td><td>Prevents idle + system + display sleep</td></tr>
+        <tr><td>☕ caffeinate -s</td><td>Always</td><td>Kernel-level sleep prevention</td></tr>
+        <tr><td>🌐 Network keepalive</td><td>3s</td><td>Keeps hotspot/Wi-Fi alive</td></tr>
+        <tr><td>🔐 Auto-lock</td><td>On lid close</td><td>Locks screen + kills display</td></tr>
+      </table>
+    </div>
+
+    <div class="section">
+      <h2>Build from source</h2>
+      <div class="code-block" onclick="copyCode(this)">git clone https://github.com/HannoJacobs/AmphetamineXL && cd AmphetamineXL && xcodebuild -scheme AmphetamineXL -configuration Release -destination 'platform=macOS' build</div>
+    </div>
+
     <p class="footer">
-      <a href="https://github.com/HannoJacobs/AmphetamineXL">View source on GitHub</a>
+      <a href="https://github.com/HannoJacobs/AmphetamineXL">GitHub</a>
       &nbsp;·&nbsp;
-      Built with IOKit + SwiftUI
+      <a href="https://github.com/HannoJacobs/AmphetamineXL/releases">Releases</a>
+      &nbsp;·&nbsp;
+      MIT License
     </p>
-    <p id="release-time" style="font-size:0.72rem;color:#333;margin-top:0.5rem"></p>
+    <p id="release-time" style="font-size:0.72rem;color:#333;margin-top:0.5rem;text-align:center"></p>
 
   </div>
   <script>
+    function copyCode(el) {
+      navigator.clipboard.writeText(el.textContent.trim());
+      el.classList.add('copied');
+      setTimeout(() => el.classList.remove('copied'), 1500);
+    }
+
     fetch('https://api.github.com/repos/HannoJacobs/AmphetamineXL/releases/latest')
       .then(r => r.json())
       .then(data => {
@@ -259,7 +419,7 @@
         const d = new Date(asset.updated_at);
         const fmt = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
           + ' at ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-        document.getElementById('release-time').textContent = 'DMG uploaded ' + fmt;
+        document.getElementById('release-time').textContent = 'Last release: ' + fmt;
       })
       .catch(() => {});
   </script>

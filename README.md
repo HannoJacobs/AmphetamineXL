@@ -54,21 +54,39 @@ To revert: `sudo pmset -a standby 1 && sudo pmset -a hibernatemode 3`
 - Screen won't dim/sleep
 - Both are intentional for the "backpack mode" use case (lid is closed anyway)
 
+## Verify it's working
+
+```bash
+# Check the app is running
+pgrep -x AmphetamineXL && echo "✅ App running" || echo "❌ Not running"
+
+# Check sleep assertions are held
+pmset -g assertions | grep -E "AmphetamineXL|caffeinate|UserIsActive"
+
+# Check standby is disabled
+pmset -g | grep -E "standby|hibernatemode|autopoweroff"
+
+# Check caffeinate subprocess is alive
+pgrep -x caffeinate
+```
+
 ## Debugging
 
-View logs:
 ```bash
+# View the app's detailed logs (init, assertions, sleep/wake events, jiggle counts)
 log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 10m
-```
 
-Check assertions:
-```bash
-pmset -g assertions | grep -E "AmphetamineXL|caffeinate|UserIsActive"
-```
-
-Check sleep/wake history:
-```bash
+# Check sleep/wake history
 pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20
+
+# Check all current assertions
+pmset -g assertions
+
+# Check lid state
+ioreg -r -k AppleClamshellState | grep AppleClamshellState
+
+# Revert standby settings (re-enable deep sleep)
+sudo pmset -a standby 1 && sudo pmset -a hibernatemode 3 && sudo pmset -a autopoweroff 1
 ```
 
 ## Build from source
@@ -77,6 +95,11 @@ pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20
 git clone https://github.com/HannoJacobs/AmphetamineXL
 cd AmphetamineXL
 xcodebuild -scheme AmphetamineXL -configuration Release -destination 'platform=macOS' build
+```
+
+One-liner to build and install:
+```bash
+git clone https://github.com/HannoJacobs/AmphetamineXL && cd AmphetamineXL && xcodebuild -scheme AmphetamineXL -configuration Release -destination 'platform=macOS' build && BINARY=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Release/AmphetamineXL" -type f 2>/dev/null | head -1) && mkdir -p /Applications/AmphetamineXL.app/Contents/MacOS && cp "$BINARY" /Applications/AmphetamineXL.app/Contents/MacOS/AmphetamineXL && xattr -cr /Applications/AmphetamineXL.app && open /Applications/AmphetamineXL.app
 ```
 
 ## How it was figured out
