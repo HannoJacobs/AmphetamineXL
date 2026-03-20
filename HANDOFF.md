@@ -84,9 +84,9 @@ pgrep -x caffeinate
 On Apple Silicon with **no external display connected**, macOS treats lid-close as a mandatory hardware event. The SMC forces a brief clamshell sleep regardless of software assertions. This is different from Intel Macs where `caffeinate -s` was sufficient.
 
 Potential real fixes to investigate:
-1. **Connect an external display** — Macs in "clamshell mode" with external display don't sleep. Could use a dummy HDMI dongle (~$5) to fool the Mac into thinking a display is connected.
-2. **SleepWatcher** — a third-party daemon that can run scripts on sleep/wake events, potentially preventing sleep via a different kernel hook.
-3. **pmset -b sleep 0** — disable sleep entirely on battery (nuclear, but might work). Command: `sudo pmset -b sleep 0`
+1. **`sudo pmset -b sleep 0`** — disable sleep entirely on battery. Try this first. Command: `sudo pmset -b sleep 0`. To verify: `pmset -g | grep sleep`
+2. **Connect an external display / dummy HDMI dongle** — Macs in "clamshell mode" with external display connected don't sleep. A ~$5 dummy HDMI plug fools the Mac into thinking a display is connected. Likely the most reliable hardware fix.
+3. **SleepWatcher** — third-party daemon that runs scripts on sleep/wake events via a different kernel hook.
 
 ---
 
