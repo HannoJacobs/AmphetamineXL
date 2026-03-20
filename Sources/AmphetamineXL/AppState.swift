@@ -11,6 +11,7 @@ final class AppState {
 
     private var assertionIDIdleSystem: IOPMAssertionID = IOPMAssertionID(0)
     private var assertionIDSystemSleep: IOPMAssertionID = IOPMAssertionID(0)
+    private var assertionIDDisplaySleep: IOPMAssertionID = IOPMAssertionID(0)
     private var durationTimer: Timer? = nil
 
     var menuBarIcon: String {
@@ -53,18 +54,24 @@ final class AppState {
             &systemID
         )
 
-        guard resultIdle == kIOReturnSuccess && resultSystem == kIOReturnSuccess else {
-            if resultIdle == kIOReturnSuccess {
-                IOPMAssertionRelease(idleID)
-            }
-            if resultSystem == kIOReturnSuccess {
-                IOPMAssertionRelease(systemID)
-            }
+        var displayID = IOPMAssertionID(0)
+        let resultDisplay = IOPMAssertionCreateWithName(
+            kIOPMAssertPreventUserIdleDisplaySleep as CFString,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn),
+            reason,
+            &displayID
+        )
+
+        guard resultIdle == kIOReturnSuccess && resultSystem == kIOReturnSuccess && resultDisplay == kIOReturnSuccess else {
+            if resultIdle == kIOReturnSuccess { IOPMAssertionRelease(idleID) }
+            if resultSystem == kIOReturnSuccess { IOPMAssertionRelease(systemID) }
+            if resultDisplay == kIOReturnSuccess { IOPMAssertionRelease(displayID) }
             return
         }
 
         assertionIDIdleSystem = idleID
         assertionIDSystemSleep = systemID
+        assertionIDDisplaySleep = displayID
         isActive = true
         activeSince = Date()
         UserDefaults.standard.set(true, forKey: "amphetamine_active")
@@ -78,8 +85,10 @@ final class AppState {
 
         IOPMAssertionRelease(assertionIDIdleSystem)
         IOPMAssertionRelease(assertionIDSystemSleep)
+        IOPMAssertionRelease(assertionIDDisplaySleep)
         assertionIDIdleSystem = IOPMAssertionID(0)
         assertionIDSystemSleep = IOPMAssertionID(0)
+        assertionIDDisplaySleep = IOPMAssertionID(0)
 
         isActive = false
         activeSince = nil
