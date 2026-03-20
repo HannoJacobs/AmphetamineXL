@@ -201,13 +201,17 @@ final class AppState {
     // MARK: - Lid state polling (backup for screensDidSleep)
 
     private func isLidClosed() -> Bool {
-        // Check via IOKit if the built-in display is off
-        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleBacklightDisplay"))
+        // Read AppleClamshellState from IOKit — the authoritative lid state
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
         if service != IO_OBJECT_NULL {
+            if let prop = IORegistryEntryCreateCFProperty(service, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0) {
+                let closed = prop.takeRetainedValue() as? Bool ?? false
+                IOObjectRelease(service)
+                return closed
+            }
             IOObjectRelease(service)
-            return false  // backlight display exists = lid open
         }
-        return true  // no backlight display = lid closed
+        return false  // default to open if we can't read
     }
 
     private func startLidCheck() {
@@ -241,32 +245,19 @@ final class AppState {
     // MARK: - Screen lock (locks on lid close so nobody can snoop)
 
     private func lockScreen() {
-        logger.notice("🔒 Attempting to lock screen...")
-
-        // Method 1: Use loginwindow's CGSession to lock
+        logger.notice("🔒 Locking screen via ScreenSaverEngine")
+        // Launch the screen saver — this triggers the lock screen if
+        // "Require password after sleep or screen saver" is enabled
+        // in System Settings (on by default). Works without special
+        // entitlements or accessibility permissions.
         let task = Process()
-        task.launchPath = "/usr/bin/osascript"
-        task.arguments = ["-e", "tell application \"System Events\" to keystroke \"q\" using {command down, control down}"]
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        task.arguments = ["-a", "ScreenSaverEngine"]
         do {
             try task.run()
-            task.waitUntilExit()
-            if task.terminationStatus == 0 {
-                logger.notice("🔒 Screen locked via Ctrl+Cmd+Q keystroke")
-                return
-            }
+            logger.notice("🔒 ScreenSaverEngine launched — screen will lock")
         } catch {
-            logger.warning("⚠️ AppleScript lock failed: \(error.localizedDescription)")
-        }
-
-        // Method 2: Fallback — CGSession lock via command line
-        let task2 = Process()
-        task2.launchPath = "/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession"
-        task2.arguments = ["-suspend"]
-        do {
-            try task2.run()
-            logger.notice("🔒 Screen locked via CGSession -suspend")
-        } catch {
-            logger.error("❌ All lock methods failed: \(error.localizedDescription)")
+            logger.error("❌ Failed to launch ScreenSaverEngine: \(error.localizedDescription)")
         }
     }
 
