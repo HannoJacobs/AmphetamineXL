@@ -141,17 +141,59 @@ final class AppState {
 
     // MARK: - Network keepalive (prevents iPhone hotspot from dropping)
 
+    // Rotate through multiple lightweight network probes to keep
+    // any connection (hotspot, Wi-Fi, etc.) from going idle.
+    private var keepaliveCounter: Int = 0
+
+    private let keepaliveHosts = [
+        "1.1.1.1",           // Cloudflare DNS
+        "8.8.8.8",           // Google DNS
+        "9.9.9.9",           // Quad9 DNS
+        "208.67.222.222",    // OpenDNS
+        "1.0.0.1",           // Cloudflare secondary
+    ]
+
     private func startKeepalive() {
         stopKeepalive()
-        let timer = Timer(timeInterval: 5, repeats: true) { _ in
-            Task {
-                // Lightweight DNS lookup — barely any data, just enough to show activity
+        let timer = Timer(timeInterval: 3, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let counter = self.keepaliveCounter
+            self.keepaliveCounter += 1
+
+            Task.detached(priority: .utility) {
+                // Rotate through hosts so traffic looks varied
+                let host = self.keepaliveHosts[counter % self.keepaliveHosts.count]
+
+                // 1. DNS lookup — generates a UDP packet
                 var hints = addrinfo()
                 hints.ai_family = AF_INET
                 hints.ai_socktype = Int32(SOCK_DGRAM)
                 var res: UnsafeMutablePointer<addrinfo>?
-                getaddrinfo("1.1.1.1", nil, &hints, &res)
+                getaddrinfo(host, nil, &hints, &res)
                 if res != nil { freeaddrinfo(res) }
+
+                // 2. Quick TCP connect attempt to port 53 (DNS) — generates
+                //    a SYN packet which is enough to show network activity.
+                //    Immediately closed, no data sent.
+                let sock = socket(AF_INET, SOCK_STREAM, 0)
+                if sock >= 0 {
+                    var addr = sockaddr_in()
+                    addr.sin_family = sa_family_t(AF_INET)
+                    addr.sin_port = UInt16(53).bigEndian
+                    inet_pton(AF_INET, host, &addr.sin_addr)
+
+                    // Non-blocking connect — we don't care if it succeeds
+                    var flags = fcntl(sock, F_GETFL, 0)
+                    flags |= O_NONBLOCK
+                    fcntl(sock, F_SETFL, flags)
+
+                    withUnsafePointer(to: &addr) { ptr in
+                        ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                            connect(sock, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+                        }
+                    }
+                    close(sock)
+                }
             }
         }
         RunLoop.main.add(timer, forMode: .common)
