@@ -1,6 +1,7 @@
 # Changelog
 
-## v1.4 — 2026-03-20
+## v1.4 — 2026-03-20 (current)
+> **Note:** Requires one-time system change — see README. Without it, Apple Silicon standby overrides all sleep prevention.
 - Fix: launch `caffeinate -s` subprocess to block standby/clamshell sleep at kernel level (IOKit assertions alone don't survive Apple Silicon standby)
 - Fix: network keepalive ping every 5s to prevent iPhone Personal Hotspot from dropping
 

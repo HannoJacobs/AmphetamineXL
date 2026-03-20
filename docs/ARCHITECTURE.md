@@ -1,5 +1,20 @@
 # Architecture
 
+## ⚠️ The Standby Problem (read this first)
+
+Apple Silicon Macs have a hardware-level sleep state called **standby** managed by the SMC (System Management Controller). This is separate from regular sleep and operates *below* the OS layer — it bypasses ALL IOKit power assertions, including `PreventSystemSleep`, and even ignores `caffeinate`. When the lid closes, the SMC can decide to enter standby regardless of what software says.
+
+**The fix:** Disable standby via `pmset`:
+```bash
+sudo pmset -a standby 0 && sudo pmset -a hibernatemode 0 && sudo pmset -a autopoweroff 0
+```
+
+This is a one-time system-level change. Normal sleep is unaffected — the Mac still sleeps/wakes normally. Only the deep hibernate state is disabled.
+
+To verify: `pmset -g | grep standby` should show `standby 0`.
+
+Without this, AmphetamineXL (and any other caffeine app) will appear to work but will lose to the SMC on lid close.
+
 ## Why Amphetamine fails
 
 Amphetamine holds `kIOPMAssertPreventUserIdleSystemSleep` — this only blocks **idle sleep** (Mac goes to sleep after inactivity). It does **not** block clamshell (lid-close) sleep.
