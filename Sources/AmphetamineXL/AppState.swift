@@ -32,6 +32,9 @@ final class AppState {
     // This lets the Mac lock and screen dim normally when the lid is open
     private var isDisplayAsleep: Bool = false
 
+    // Lid state polling — backup for screensDidSleep which can be unreliable
+    private var lidCheckTimer: Timer? = nil
+
     private let keepaliveHosts = [
         "1.1.1.1",           // Cloudflare DNS
         "8.8.8.8",           // Google DNS
@@ -100,6 +103,7 @@ final class AppState {
 
         startCaffeinate()
         startKeepalive()
+        startLidCheck()
         // Mouse jiggle only starts when display sleeps (lid close)
         // This lets the Mac lock/dim normally when lid is open
         if isDisplayAsleep {
@@ -130,6 +134,7 @@ final class AppState {
         stopCaffeinate()
         stopKeepalive()
         stopMouseJiggle()
+        stopLidCheck()
 
         isActive = false
         activeSince = nil
@@ -193,28 +198,75 @@ final class AppState {
         logger.notice("📡 Registered for sleep/wake/display notifications")
     }
 
+    // MARK: - Lid state polling (backup for screensDidSleep)
+
+    private func isLidClosed() -> Bool {
+        // Check via IOKit if the built-in display is off
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleBacklightDisplay"))
+        if service != IO_OBJECT_NULL {
+            IOObjectRelease(service)
+            return false  // backlight display exists = lid open
+        }
+        return true  // no backlight display = lid closed
+    }
+
+    private func startLidCheck() {
+        stopLidCheck()
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            guard let self, self.isActive else { return }
+            let lidClosed = self.isLidClosed()
+
+            if lidClosed && !self.isDisplayAsleep {
+                logger.notice("🖥️ LID CHECK: lid closed detected — activating clamshell mode")
+                self.isDisplayAsleep = true
+                self.lockScreen()
+                self.startMouseJiggle()
+                self.holdDisplayAssertion()
+            } else if !lidClosed && self.isDisplayAsleep {
+                logger.notice("🖥️ LID CHECK: lid opened detected — deactivating clamshell mode")
+                self.isDisplayAsleep = false
+                self.stopMouseJiggle()
+                self.releaseDisplayAssertion()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        lidCheckTimer = timer
+    }
+
+    private func stopLidCheck() {
+        lidCheckTimer?.invalidate()
+        lidCheckTimer = nil
+    }
+
     // MARK: - Screen lock (locks on lid close so nobody can snoop)
 
     private func lockScreen() {
-        // SACLockScreenImmediate is the same API macOS uses for Ctrl+Cmd+Q
-        let libHandle = dlopen("/System/Library/PrivateFrameworks/login.framework/Versions/Current/login", RTLD_LAZY)
-        if let libHandle {
-            typealias LockFunc = @convention(c) () -> Void
-            if let lockSymbol = dlsym(libHandle, "SACLockScreenImmediate") {
-                let lock = unsafeBitCast(lockSymbol, to: LockFunc.self)
-                lock()
-                logger.notice("🔒 Screen locked on lid close")
-            } else {
-                logger.warning("⚠️ SACLockScreenImmediate not found — falling back to CGSession")
-                // Fallback: use CGSession via command line
-                let task = Process()
-                task.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
-                task.arguments = ["displaysleepnow"]
-                try? task.run()
+        logger.notice("🔒 Attempting to lock screen...")
+
+        // Method 1: Use loginwindow's CGSession to lock
+        let task = Process()
+        task.launchPath = "/usr/bin/osascript"
+        task.arguments = ["-e", "tell application \"System Events\" to keystroke \"q\" using {command down, control down}"]
+        do {
+            try task.run()
+            task.waitUntilExit()
+            if task.terminationStatus == 0 {
+                logger.notice("🔒 Screen locked via Ctrl+Cmd+Q keystroke")
+                return
             }
-            dlclose(libHandle)
-        } else {
-            logger.error("❌ Could not load login.framework")
+        } catch {
+            logger.warning("⚠️ AppleScript lock failed: \(error.localizedDescription)")
+        }
+
+        // Method 2: Fallback — CGSession lock via command line
+        let task2 = Process()
+        task2.launchPath = "/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession"
+        task2.arguments = ["-suspend"]
+        do {
+            try task2.run()
+            logger.notice("🔒 Screen locked via CGSession -suspend")
+        } catch {
+            logger.error("❌ All lock methods failed: \(error.localizedDescription)")
         }
     }
 
