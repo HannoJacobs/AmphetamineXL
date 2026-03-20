@@ -167,7 +167,7 @@ final class AppState {
 
     private func startMouseJiggle() {
         stopMouseJiggle()
-        let timer = Timer(timeInterval: 4, repeats: true) { _ in
+        let timer = Timer(timeInterval: 1, repeats: true) { _ in
             // Get current mouse position
             let currentPos = CGEvent(source: nil)?.location ?? CGPoint(x: 100, y: 100)
 
