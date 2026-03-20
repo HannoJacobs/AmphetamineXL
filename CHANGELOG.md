@@ -1,6 +1,29 @@
 # Changelog
 
-## v2.0 — 2026-03-20 (current) 🎉
+## v2.1 — 2026-03-20 (current)
+> Smart lid handling — jiggle, lock, and display off only when lid is closed.
+
+### What changed
+- **Smart lid detection:** Polls `AppleClamshellState` via IOKit every 2s to reliably detect lid open/close
+- **Auto-lock on lid close:** Launches ScreenSaverEngine which triggers the lock screen (requires "Require password after screen saver" in System Settings)
+- **Display off on lid close:** After locking, runs `pmset displaysleepnow` to kill backlight — no pixels burning with lid closed
+- **Mouse jiggle only when lid is closed:** Screen can dim and Mac can auto-lock normally when lid is open
+- **Display assertion only when lid is closed:** `PreventUserIdleDisplaySleep` only held during clamshell mode
+
+### Lid open behavior
+- 2 IOKit assertions (system sleep prevention)
+- caffeinate subprocess
+- Network keepalive
+- Screen dims/locks normally
+
+### Lid closed behavior
+- All of the above, plus:
+- Mouse jiggle (1s) — prevents clamshell sleep
+- Display assertion held
+- Screen locked via ScreenSaverEngine
+- Display forced off via pmset
+
+## v2.0 — 2026-03-20 🎉
 > **THE FIX.** Lid-close sleep on Apple Silicon is finally solved.
 > Mac stays fully awake with lid closed, no external display, on iPhone hotspot. Backpack mode works.
 

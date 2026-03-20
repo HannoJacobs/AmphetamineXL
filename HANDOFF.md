@@ -1,7 +1,7 @@
 # AmphetamineXL — Handoff Document
 
 **Date:** 2026-03-20
-**Status:** ✅ WORKING — v2.0 confirmed. Mac stays awake with lid closed, no external display, on iPhone hotspot.
+**Status:** ✅ WORKING — v2.1 confirmed. Mac stays awake with lid closed, no external display, on iPhone hotspot. Auto-locks and kills display on lid close.
 
 ---
 
@@ -11,7 +11,7 @@ AmphetamineXL — a macOS menu bar app that prevents Mac sleep when lid is close
 - Repo: `/Users/hannojacobs/Documents/Code/AmphetamineXL`
 - GitHub: https://github.com/HannoJacobs/AmphetamineXL
 - Installed: `/Applications/AmphetamineXL.app`
-- Current version: v2.0
+- Current version: v2.1
 
 ## The Problem (solved)
 
@@ -72,14 +72,19 @@ On Apple Silicon with no external display, lid-close is a hardware event handled
 
 This is fundamentally different from Intel Macs where `caffeinate -s` was sufficient.
 
-## Known Side-Effects
+## Lid-Aware Behavior (v2.1)
 
-- Mac won't auto-lock while caffeinated (mouse jiggle = user activity)
-- Screen won't dim while caffeinated
-- Both intentional for backpack mode (lid is closed)
+**Lid open:** Screen dims/locks normally. Only system sleep assertions + caffeinate + keepalive active.
+
+**Lid closed:**
+1. Screen locks via ScreenSaverEngine
+2. Display forced off via `pmset displaysleepnow` (no backlight burning)
+3. Mouse jiggle starts (prevents clamshell sleep)
+4. Display assertion held
+
+Detection: `AppleClamshellState` polled every 2s via IOKit `IOPMrootDomain`.
 
 ## Future Improvements (not yet implemented)
 
-- Only jiggle when display is off / lid is closed (detect via `screensDidSleep` notification) — would allow auto-lock when lid is open
 - Privileged helper to set/unset `disablesleep` via pmset (like Amphetamine's `installPowerProtectSudoOverride`)
 - Battery safeguard — auto-disable caffeine below X% battery
