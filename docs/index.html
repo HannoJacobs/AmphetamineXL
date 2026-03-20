@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AmphetamineXL - Caffeine toggle that actually works</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0d0d0d;
+      color: #f0f0f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+
+    .container {
+      max-width: 580px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .badge {
+      display: inline-block;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 999px;
+      padding: 0.3rem 0.9rem;
+      font-size: 0.78rem;
+      color: #888;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 1.8rem;
+    }
+
+    h1 {
+      font-size: clamp(2.8rem, 8vw, 4.5rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1;
+      margin-bottom: 1.2rem;
+    }
+
+    .tagline {
+      font-size: 1.15rem;
+      color: #999;
+      line-height: 1.6;
+      margin-bottom: 2.5rem;
+    }
+
+    .download-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      background: #f0f0f0;
+      color: #0d0d0d;
+      text-decoration: none;
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 0.85rem 1.8rem;
+      border-radius: 12px;
+      transition: background 0.15s, transform 0.1s;
+      margin-bottom: 0.75rem;
+    }
+
+    .download-btn:hover { background: #fff; transform: translateY(-1px); }
+    .download-btn:active { transform: translateY(0); }
+
+    .download-btn svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+
+    .sub {
+      font-size: 0.8rem;
+      color: #555;
+      margin-bottom: 3.5rem;
+    }
+
+    .features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      text-align: left;
+      margin-bottom: 3rem;
+    }
+
+    .feature {
+      background: #141414;
+      border: 1px solid #1f1f1f;
+      border-radius: 12px;
+      padding: 1.1rem 1.2rem;
+    }
+
+    .feature-icon {
+      font-size: 1.3rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .feature h3 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+      color: #e8e8e8;
+    }
+
+    .feature p {
+      font-size: 0.8rem;
+      color: #666;
+      line-height: 1.5;
+    }
+
+    .install-steps {
+      background: #141414;
+      border: 1px solid #1f1f1f;
+      border-radius: 12px;
+      padding: 1.4rem 1.6rem;
+      text-align: left;
+      margin-bottom: 2.5rem;
+    }
+
+    .install-steps h2 {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #555;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+    }
+
+    .install-steps ol {
+      list-style: none;
+      counter-reset: steps;
+    }
+
+    .install-steps li {
+      counter-increment: steps;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      font-size: 0.875rem;
+      color: #bbb;
+      line-height: 1.5;
+      padding: 0.4rem 0;
+    }
+
+    .install-steps li > span { flex: 1; min-width: 0; }
+
+    .install-steps li::before {
+      content: counter(steps);
+      background: #222;
+      border: 1px solid #2a2a2a;
+      border-radius: 999px;
+      width: 1.4rem;
+      height: 1.4rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: #666;
+      flex-shrink: 0;
+      margin-top: 0.05rem;
+    }
+
+    .footer {
+      font-size: 0.78rem;
+      color: #444;
+    }
+
+    .footer a { color: #666; text-decoration: none; }
+    .footer a:hover { color: #999; }
+
+    @media (max-width: 480px) {
+      .features { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <div class="badge">macOS 14+ &nbsp;·&nbsp; Apple Silicon</div>
+
+    <h1>⚡ AmphetamineXL</h1>
+
+    <p class="tagline">
+      One click. Lid closed. Still awake.<br>
+      The caffeine toggle that actually prevents clamshell sleep.<br>
+      <span style="color:#555;font-size:0.95em">Because Amphetamine keeps failing.</span>
+    </p>
+
+    <a class="download-btn" href="https://github.com/HannoJacobs/AmphetamineXL/releases/latest/download/AmphetamineXL.dmg">
+      <svg viewBox="0 0 20 20" fill="currentColor">
+        <path d="M10 2a1 1 0 011 1v9.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L9 12.586V3a1 1 0 011-1z"/>
+        <path d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/>
+      </svg>
+      Download for Mac
+    </a>
+
+    <p class="sub">Free &amp; open source &nbsp;·&nbsp; <span id="release-version">v1.0</span> &nbsp;·&nbsp; &lt;1 MB</p>
+
+    <div class="features">
+      <div class="feature">
+        <div class="feature-icon">💊</div>
+        <h3>Actually works</h3>
+        <p>Holds <code style="font-size:0.8em;background:#1a1a1a;padding:0.1em 0.3em;border-radius:3px">PreventSystemSleep</code> — the assertion that blocks lid-close sleep, not just idle sleep.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">⚡</div>
+        <h3>One click</h3>
+        <p>Click the menu bar icon to toggle. Green bolt = caffeinated. Slash = sleeping. Shows how long it's been active.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🚀</div>
+        <h3>Launch at login</h3>
+        <p>Enable once and forget about it. Remembers your last state across restarts.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🪶</div>
+        <h3>Tiny &amp; native</h3>
+        <p>Pure Swift, IOKit directly. No subprocess, no shell commands, no background agents. Under 1 MB.</p>
+      </div>
+    </div>
+
+    <div class="install-steps">
+      <h2>Getting started</h2>
+      <ol>
+        <li><span>Open the DMG and drag AmphetamineXL to Applications</span></li>
+        <li><span>Open Terminal and run: <code style="background:#1a1a1a;padding:0.1em 0.4em;border-radius:4px;font-size:0.85em">xattr -cr /Applications/AmphetamineXL.app</code></span></li>
+        <li><span>Open AmphetamineXL from Applications</span></li>
+        <li><span>Click the ⚡ icon in your menu bar to enable caffeine</span></li>
+        <li><span>Close your lid — your Mac stays awake</span></li>
+      </ol>
+    </div>
+
+    <p class="footer">
+      <a href="https://github.com/HannoJacobs/AmphetamineXL">View source on GitHub</a>
+      &nbsp;·&nbsp;
+      Built with IOKit + SwiftUI
+    </p>
+    <p id="release-time" style="font-size:0.72rem;color:#333;margin-top:0.5rem"></p>
+
+  </div>
+  <script>
+    fetch('https://api.github.com/repos/HannoJacobs/AmphetamineXL/releases/latest')
+      .then(r => r.json())
+      .then(data => {
+        if (data.tag_name) {
+          document.getElementById('release-version').textContent = data.tag_name;
+        }
+        const asset = data.assets && data.assets.find(a => a.name === 'AmphetamineXL.dmg');
+        if (!asset) return;
+        const d = new Date(asset.updated_at);
+        const fmt = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+          + ' at ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        document.getElementById('release-time').textContent = 'DMG uploaded ' + fmt;
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>
