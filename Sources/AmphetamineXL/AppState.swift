@@ -1,6 +1,7 @@
 import SwiftUI
 import IOKit
 import IOKit.pwr_mgt
+import CoreGraphics
 
 @Observable
 @MainActor
@@ -22,6 +23,12 @@ final class AppState {
     // Network keepalive — pings 1.1.1.1 every 5s to prevent iPhone hotspot
     // from dropping the connection when it thinks no traffic is flowing.
     private var keepaliveTimer: Timer? = nil
+
+    // Simulated mouse movement — the key trick from Amphetamine.
+    // Apple Silicon SMC ignores IOKit assertions for clamshell sleep,
+    // but respects HID activity. By posting a tiny CGEvent mouse move
+    // every few seconds, the system thinks a user is present.
+    private var mouseJiggleTimer: Timer? = nil
 
     var menuBarIcon: String {
         isActive ? "bolt.fill" : "bolt.slash"
@@ -83,6 +90,9 @@ final class AppState {
         // Start network keepalive to prevent iPhone hotspot from dropping
         startKeepalive()
 
+        // Start mouse jiggle — the real clamshell sleep prevention
+        startMouseJiggle()
+
         isActive = true
         activeSince = Date()
         UserDefaults.standard.set(true, forKey: "amphetamine_active")
@@ -103,6 +113,7 @@ final class AppState {
 
         stopCaffeinate()
         stopKeepalive()
+        stopMouseJiggle()
 
         isActive = false
         activeSince = nil
@@ -150,6 +161,48 @@ final class AppState {
     private func stopKeepalive() {
         keepaliveTimer?.invalidate()
         keepaliveTimer = nil
+    }
+
+    // MARK: - Mouse jiggle (prevents clamshell sleep on Apple Silicon)
+
+    private func startMouseJiggle() {
+        stopMouseJiggle()
+        let timer = Timer(timeInterval: 4, repeats: true) { _ in
+            // Get current mouse position
+            let currentPos = CGEvent(source: nil)?.location ?? CGPoint(x: 100, y: 100)
+
+            // Move 1px right then back — invisible to the user but enough
+            // to register as HID activity with the SMC
+            let moved = CGPoint(x: currentPos.x + 1, y: currentPos.y)
+
+            if let moveEvent = CGEvent(
+                mouseEventSource: nil,
+                mouseType: .mouseMoved,
+                mouseCursorPosition: moved,
+                mouseButton: .left
+            ) {
+                moveEvent.post(tap: .cghidEventTap)
+            }
+
+            // Move back after a tiny delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                if let backEvent = CGEvent(
+                    mouseEventSource: nil,
+                    mouseType: .mouseMoved,
+                    mouseCursorPosition: currentPos,
+                    mouseButton: .left
+                ) {
+                    backEvent.post(tap: .cghidEventTap)
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        mouseJiggleTimer = timer
+    }
+
+    private func stopMouseJiggle() {
+        mouseJiggleTimer?.invalidate()
+        mouseJiggleTimer = nil
     }
 
     // MARK: - Duration timer
