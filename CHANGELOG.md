@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.4 — 2026-03-20
+- Fix: launch `caffeinate -s` subprocess to block standby/clamshell sleep at kernel level (IOKit assertions alone don't survive Apple Silicon standby)
+- Fix: network keepalive ping every 5s to prevent iPhone Personal Hotspot from dropping
+
 ## v1.3 — 2026-03-20
 - Default ON: caffeine enabled automatically on first launch and after login
 - User must manually disable — off is never the default

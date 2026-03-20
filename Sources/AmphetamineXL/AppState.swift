@@ -14,6 +14,15 @@ final class AppState {
     private var assertionIDDisplaySleep: IOPMAssertionID = IOPMAssertionID(0)
     private var durationTimer: Timer? = nil
 
+    // caffeinate -s as a backing process — required on Apple Silicon because
+    // standby (SMC-level deep sleep) ignores IOKit assertions entirely.
+    // caffeinate goes through a different kernel path that standby respects.
+    private var caffeinateProcess: Process? = nil
+
+    // Network keepalive — pings 1.1.1.1 every 5s to prevent iPhone hotspot
+    // from dropping the connection when it thinks no traffic is flowing.
+    private var keepaliveTimer: Timer? = nil
+
     var menuBarIcon: String {
         isActive ? "bolt.fill" : "bolt.slash"
     }
@@ -41,7 +50,7 @@ final class AppState {
         let reason = "AmphetamineXL preventing sleep" as CFString
 
         var idleID = IOPMAssertionID(0)
-        let resultIdle = IOPMAssertionCreateWithName(
+        IOPMAssertionCreateWithName(
             kIOPMAssertPreventUserIdleSystemSleep as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
             reason,
@@ -49,7 +58,7 @@ final class AppState {
         )
 
         var systemID = IOPMAssertionID(0)
-        let resultSystem = IOPMAssertionCreateWithName(
+        IOPMAssertionCreateWithName(
             kIOPMAssertionTypePreventSystemSleep as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
             reason,
@@ -57,23 +66,23 @@ final class AppState {
         )
 
         var displayID = IOPMAssertionID(0)
-        let resultDisplay = IOPMAssertionCreateWithName(
+        IOPMAssertionCreateWithName(
             kIOPMAssertPreventUserIdleDisplaySleep as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
             reason,
             &displayID
         )
 
-        guard resultIdle == kIOReturnSuccess && resultSystem == kIOReturnSuccess && resultDisplay == kIOReturnSuccess else {
-            if resultIdle == kIOReturnSuccess { IOPMAssertionRelease(idleID) }
-            if resultSystem == kIOReturnSuccess { IOPMAssertionRelease(systemID) }
-            if resultDisplay == kIOReturnSuccess { IOPMAssertionRelease(displayID) }
-            return
-        }
-
         assertionIDIdleSystem = idleID
         assertionIDSystemSleep = systemID
         assertionIDDisplaySleep = displayID
+
+        // Launch caffeinate -s to block standby/clamshell at kernel level
+        startCaffeinate()
+
+        // Start network keepalive to prevent iPhone hotspot from dropping
+        startKeepalive()
+
         isActive = true
         activeSince = Date()
         UserDefaults.standard.set(true, forKey: "amphetamine_active")
@@ -92,6 +101,9 @@ final class AppState {
         assertionIDSystemSleep = IOPMAssertionID(0)
         assertionIDDisplaySleep = IOPMAssertionID(0)
 
+        stopCaffeinate()
+        stopKeepalive()
+
         isActive = false
         activeSince = nil
         durationText = "Inactive"
@@ -99,6 +111,48 @@ final class AppState {
 
         stopDurationTimer()
     }
+
+    // MARK: - caffeinate subprocess
+
+    private func startCaffeinate() {
+        stopCaffeinate()
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
+        p.arguments = ["-s"]  // -s = PreventSystemSleep, survives standby
+        try? p.run()
+        caffeinateProcess = p
+    }
+
+    private func stopCaffeinate() {
+        caffeinateProcess?.terminate()
+        caffeinateProcess = nil
+    }
+
+    // MARK: - Network keepalive (prevents iPhone hotspot from dropping)
+
+    private func startKeepalive() {
+        stopKeepalive()
+        let timer = Timer(timeInterval: 5, repeats: true) { _ in
+            Task {
+                // Lightweight DNS lookup — barely any data, just enough to show activity
+                var hints = addrinfo()
+                hints.ai_family = AF_INET
+                hints.ai_socktype = Int32(SOCK_DGRAM.rawValue)
+                var res: UnsafeMutablePointer<addrinfo>?
+                getaddrinfo("1.1.1.1", nil, &hints, &res)
+                if res != nil { freeaddrinfo(res) }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        keepaliveTimer = timer
+    }
+
+    private func stopKeepalive() {
+        keepaliveTimer?.invalidate()
+        keepaliveTimer = nil
+    }
+
+    // MARK: - Duration timer
 
     private func startDurationTimer() {
         stopDurationTimer()
