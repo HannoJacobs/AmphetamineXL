@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.3 — 2026-03-20
+- Default ON: caffeine enabled automatically on first launch and after login
+- User must manually disable — off is never the default
+
 ## v1.2 — 2026-03-20
 - Fix: hold PreventUserIdleDisplaySleep assertion so Chrome/Meet doesn't drop when lid closes
 - Now holds all 3 assertions: PreventUserIdleSystemSleep, PreventSystemSleep, PreventUserIdleDisplaySleep

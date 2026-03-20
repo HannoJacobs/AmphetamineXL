@@ -19,7 +19,9 @@ final class AppState {
     }
 
     init() {
-        let savedState = UserDefaults.standard.bool(forKey: "amphetamine_active")
+        // Default ON — user must explicitly disable. Fall back to true if key not yet set.
+        let hasSetPref = UserDefaults.standard.object(forKey: "amphetamine_active") != nil
+        let savedState = hasSetPref ? UserDefaults.standard.bool(forKey: "amphetamine_active") : true
         if savedState {
             enableCaffeine()
         }
