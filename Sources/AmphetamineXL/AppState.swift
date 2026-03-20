@@ -171,9 +171,12 @@ final class AppState {
 
         wsnc.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
-            logger.notice("🖥️ DISPLAY SLEEP (lid closed or display off) — starting mouse jiggle + display assertion")
+            logger.notice("🖥️ DISPLAY SLEEP (lid closed or display off) — locking screen, then starting jiggle")
             self.isDisplayAsleep = true
             if self.isActive {
+                // Lock the screen BEFORE starting the jiggle
+                // Mouse jiggle won't bypass the lock — it just shows the login prompt
+                self.lockScreen()
                 self.startMouseJiggle()
                 self.holdDisplayAssertion()
             }
@@ -188,6 +191,31 @@ final class AppState {
         }
 
         logger.notice("📡 Registered for sleep/wake/display notifications")
+    }
+
+    // MARK: - Screen lock (locks on lid close so nobody can snoop)
+
+    private func lockScreen() {
+        // SACLockScreenImmediate is the same API macOS uses for Ctrl+Cmd+Q
+        let libHandle = dlopen("/System/Library/PrivateFrameworks/login.framework/Versions/Current/login", RTLD_LAZY)
+        if let libHandle {
+            typealias LockFunc = @convention(c) () -> Void
+            if let lockSymbol = dlsym(libHandle, "SACLockScreenImmediate") {
+                let lock = unsafeBitCast(lockSymbol, to: LockFunc.self)
+                lock()
+                logger.notice("🔒 Screen locked on lid close")
+            } else {
+                logger.warning("⚠️ SACLockScreenImmediate not found — falling back to CGSession")
+                // Fallback: use CGSession via command line
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+                task.arguments = ["displaysleepnow"]
+                try? task.run()
+            }
+            dlclose(libHandle)
+        } else {
+            logger.error("❌ Could not load login.framework")
+        }
     }
 
     // MARK: - Display assertion (only held when lid is closed)
