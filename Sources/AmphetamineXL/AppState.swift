@@ -2,6 +2,9 @@ import SwiftUI
 import IOKit
 import IOKit.pwr_mgt
 import CoreGraphics
+import os.log
+
+private let logger = Logger(subsystem: "com.hannojacobs.AmphetamineXL", category: "SleepPrevention")
 
 @Observable
 @MainActor
@@ -15,29 +18,37 @@ final class AppState {
     private var assertionIDDisplaySleep: IOPMAssertionID = IOPMAssertionID(0)
     private var durationTimer: Timer? = nil
 
-    // caffeinate -s as a backing process — required on Apple Silicon because
-    // standby (SMC-level deep sleep) ignores IOKit assertions entirely.
-    // caffeinate goes through a different kernel path that standby respects.
     private var caffeinateProcess: Process? = nil
-
-    // Network keepalive — pings 1.1.1.1 every 5s to prevent iPhone hotspot
-    // from dropping the connection when it thinks no traffic is flowing.
     private var keepaliveTimer: Timer? = nil
-
-    // Simulated mouse movement — the key trick from Amphetamine.
-    // Apple Silicon SMC ignores IOKit assertions for clamshell sleep,
-    // but respects HID activity. By posting a tiny CGEvent mouse move
-    // every few seconds, the system thinks a user is present.
     private var mouseJiggleTimer: Timer? = nil
+
+    // Track stats for debugging
+    private var mouseJiggleCount: Int = 0
+    private var keepaliveCount: Int = 0
+    private var keepaliveCounter: Int = 0
+    private var lastJiggleTime: Date? = nil
+
+    private let keepaliveHosts = [
+        "1.1.1.1",           // Cloudflare DNS
+        "8.8.8.8",           // Google DNS
+        "9.9.9.9",           // Quad9 DNS
+        "208.67.222.222",    // OpenDNS
+        "1.0.0.1",           // Cloudflare secondary
+    ]
 
     var menuBarIcon: String {
         isActive ? "bolt.fill" : "bolt.slash"
     }
 
     init() {
-        // Default ON — user must explicitly disable. Fall back to true if key not yet set.
+        logger.notice("🚀 AmphetamineXL initializing")
+
+        // Register for sleep/wake notifications
+        registerSleepWakeNotifications()
+
         let hasSetPref = UserDefaults.standard.object(forKey: "amphetamine_active") != nil
         let savedState = hasSetPref ? UserDefaults.standard.bool(forKey: "amphetamine_active") : true
+        logger.notice("📋 Saved state: \(savedState), hasSetPref: \(hasSetPref)")
         if savedState {
             enableCaffeine()
         }
@@ -53,56 +64,59 @@ final class AppState {
 
     func enableCaffeine() {
         guard !isActive else { return }
+        logger.notice("⚡ Enabling caffeine — creating assertions")
 
         let reason = "AmphetamineXL preventing sleep" as CFString
 
         var idleID = IOPMAssertionID(0)
-        IOPMAssertionCreateWithName(
+        let r1 = IOPMAssertionCreateWithName(
             kIOPMAssertPreventUserIdleSystemSleep as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
             reason,
             &idleID
         )
+        logger.notice("  PreventUserIdleSystemSleep: \(r1 == kIOReturnSuccess ? "✅" : "❌ error \(r1)")")
 
         var systemID = IOPMAssertionID(0)
-        IOPMAssertionCreateWithName(
+        let r2 = IOPMAssertionCreateWithName(
             kIOPMAssertionTypePreventSystemSleep as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
             reason,
             &systemID
         )
+        logger.notice("  PreventSystemSleep: \(r2 == kIOReturnSuccess ? "✅" : "❌ error \(r2)")")
 
         var displayID = IOPMAssertionID(0)
-        IOPMAssertionCreateWithName(
+        let r3 = IOPMAssertionCreateWithName(
             kIOPMAssertPreventUserIdleDisplaySleep as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
             reason,
             &displayID
         )
+        logger.notice("  PreventUserIdleDisplaySleep: \(r3 == kIOReturnSuccess ? "✅" : "❌ error \(r3)")")
 
         assertionIDIdleSystem = idleID
         assertionIDSystemSleep = systemID
         assertionIDDisplaySleep = displayID
 
-        // Launch caffeinate -s to block standby/clamshell at kernel level
         startCaffeinate()
-
-        // Start network keepalive to prevent iPhone hotspot from dropping
         startKeepalive()
-
-        // Start mouse jiggle — the real clamshell sleep prevention
         startMouseJiggle()
 
         isActive = true
         activeSince = Date()
+        mouseJiggleCount = 0
+        keepaliveCount = 0
         UserDefaults.standard.set(true, forKey: "amphetamine_active")
 
         updateDurationText()
         startDurationTimer()
+        logger.notice("⚡ Caffeine ENABLED — all systems go")
     }
 
     func disableCaffeine() {
         guard isActive else { return }
+        logger.notice("💤 Disabling caffeine")
 
         IOPMAssertionRelease(assertionIDIdleSystem)
         IOPMAssertionRelease(assertionIDSystemSleep)
@@ -121,6 +135,45 @@ final class AppState {
         UserDefaults.standard.set(false, forKey: "amphetamine_active")
 
         stopDurationTimer()
+        logger.notice("💤 Caffeine DISABLED")
+    }
+
+    // MARK: - Sleep/Wake notifications
+
+    private func registerSleepWakeNotifications() {
+        let wsnc = NSWorkspace.shared.notificationCenter
+
+        wsnc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            logger.critical("🛑 SYSTEM WILL SLEEP — jiggle count: \(self.mouseJiggleCount), keepalive count: \(self.keepaliveCount), last jiggle: \(self.lastJiggleTime?.description ?? "never")")
+            // Try one last-ditch mouse event
+            self.postMouseJiggle(label: "last-ditch-before-sleep")
+        }
+
+        wsnc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            logger.critical("🟢 SYSTEM DID WAKE — resuming all timers")
+            // Restart everything on wake in case timers got killed
+            if self.isActive {
+                self.startMouseJiggle()
+                self.startKeepalive()
+                // Make sure caffeinate is still alive
+                if let p = self.caffeinateProcess, !p.isRunning {
+                    logger.warning("⚠️ caffeinate died during sleep — restarting")
+                    self.startCaffeinate()
+                }
+            }
+        }
+
+        wsnc.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { _ in
+            logger.notice("🖥️ DISPLAY SLEEP (lid closed or display off)")
+        }
+
+        wsnc.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in
+            logger.notice("🖥️ DISPLAY WAKE (lid opened or display on)")
+        }
+
+        logger.notice("📡 Registered for sleep/wake/display notifications")
     }
 
     // MARK: - caffeinate subprocess
@@ -129,42 +182,39 @@ final class AppState {
         stopCaffeinate()
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
-        p.arguments = ["-s"]  // -s = PreventSystemSleep, survives standby
-        try? p.run()
-        caffeinateProcess = p
+        p.arguments = ["-s"]
+        do {
+            try p.run()
+            caffeinateProcess = p
+            logger.notice("☕ caffeinate -s started (PID \(p.processIdentifier))")
+        } catch {
+            logger.error("❌ Failed to start caffeinate: \(error.localizedDescription)")
+        }
     }
 
     private func stopCaffeinate() {
-        caffeinateProcess?.terminate()
+        if let p = caffeinateProcess {
+            logger.notice("☕ Stopping caffeinate (PID \(p.processIdentifier))")
+            p.terminate()
+        }
         caffeinateProcess = nil
     }
 
-    // MARK: - Network keepalive (prevents iPhone hotspot from dropping)
-
-    // Rotate through multiple lightweight network probes to keep
-    // any connection (hotspot, Wi-Fi, etc.) from going idle.
-    private var keepaliveCounter: Int = 0
-
-    private let keepaliveHosts = [
-        "1.1.1.1",           // Cloudflare DNS
-        "8.8.8.8",           // Google DNS
-        "9.9.9.9",           // Quad9 DNS
-        "208.67.222.222",    // OpenDNS
-        "1.0.0.1",           // Cloudflare secondary
-    ]
+    // MARK: - Network keepalive
 
     private func startKeepalive() {
         stopKeepalive()
+        logger.notice("🌐 Starting network keepalive (3s interval, \(self.keepaliveHosts.count) hosts)")
         let timer = Timer(timeInterval: 3, repeats: true) { [weak self] _ in
             guard let self else { return }
             let counter = self.keepaliveCounter
             self.keepaliveCounter += 1
+            self.keepaliveCount += 1
 
             Task.detached(priority: .utility) {
-                // Rotate through hosts so traffic looks varied
                 let host = self.keepaliveHosts[counter % self.keepaliveHosts.count]
 
-                // 1. DNS lookup — generates a UDP packet
+                // 1. DNS lookup
                 var hints = addrinfo()
                 hints.ai_family = AF_INET
                 hints.ai_socktype = Int32(SOCK_DGRAM)
@@ -172,9 +222,7 @@ final class AppState {
                 getaddrinfo(host, nil, &hints, &res)
                 if res != nil { freeaddrinfo(res) }
 
-                // 2. Quick TCP connect attempt to port 53 (DNS) — generates
-                //    a SYN packet which is enough to show network activity.
-                //    Immediately closed, no data sent.
+                // 2. TCP SYN to port 53
                 let sock = socket(AF_INET, SOCK_STREAM, 0)
                 if sock >= 0 {
                     var addr = sockaddr_in()
@@ -182,7 +230,6 @@ final class AppState {
                     addr.sin_port = UInt16(53).bigEndian
                     inet_pton(AF_INET, host, &addr.sin_addr)
 
-                    // Non-blocking connect — we don't care if it succeeds
                     var flags = fcntl(sock, F_GETFL, 0)
                     flags |= O_NONBLOCK
                     fcntl(sock, F_SETFL, flags)
@@ -193,6 +240,11 @@ final class AppState {
                         }
                     }
                     close(sock)
+                }
+
+                // Log every 100 keepalives (~5 min)
+                if counter % 100 == 0 {
+                    logger.info("🌐 Keepalive #\(counter) → \(host)")
                 }
             }
         }
@@ -207,35 +259,46 @@ final class AppState {
 
     // MARK: - Mouse jiggle (prevents clamshell sleep on Apple Silicon)
 
-    private func startMouseJiggle() {
-        stopMouseJiggle()
-        let timer = Timer(timeInterval: 1, repeats: true) { _ in
-            // Get current mouse position
-            let currentPos = CGEvent(source: nil)?.location ?? CGPoint(x: 100, y: 100)
+    private func postMouseJiggle(label: String = "tick") {
+        let currentPos = CGEvent(source: nil)?.location ?? CGPoint(x: 100, y: 100)
+        let moved = CGPoint(x: currentPos.x + 1, y: currentPos.y)
 
-            // Move 1px right then back — invisible to the user but enough
-            // to register as HID activity with the SMC
-            let moved = CGPoint(x: currentPos.x + 1, y: currentPos.y)
+        if let moveEvent = CGEvent(
+            mouseEventSource: nil,
+            mouseType: .mouseMoved,
+            mouseCursorPosition: moved,
+            mouseButton: .left
+        ) {
+            moveEvent.post(tap: .cghidEventTap)
+        } else {
+            logger.error("❌ CGEvent creation FAILED for mouse move (\(label))")
+            return
+        }
 
-            if let moveEvent = CGEvent(
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            if let backEvent = CGEvent(
                 mouseEventSource: nil,
                 mouseType: .mouseMoved,
-                mouseCursorPosition: moved,
+                mouseCursorPosition: currentPos,
                 mouseButton: .left
             ) {
-                moveEvent.post(tap: .cghidEventTap)
+                backEvent.post(tap: .cghidEventTap)
             }
+        }
+    }
 
-            // Move back after a tiny delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                if let backEvent = CGEvent(
-                    mouseEventSource: nil,
-                    mouseType: .mouseMoved,
-                    mouseCursorPosition: currentPos,
-                    mouseButton: .left
-                ) {
-                    backEvent.post(tap: .cghidEventTap)
-                }
+    private func startMouseJiggle() {
+        stopMouseJiggle()
+        logger.notice("🖱️ Starting mouse jiggle (1s interval)")
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.mouseJiggleCount += 1
+            self.lastJiggleTime = Date()
+            self.postMouseJiggle()
+
+            // Log every 60 jiggle (1 min)
+            if self.mouseJiggleCount % 60 == 0 {
+                logger.info("🖱️ Jiggle #\(self.mouseJiggleCount) (running \(self.mouseJiggleCount)s)")
             }
         }
         RunLoop.main.add(timer, forMode: .common)
