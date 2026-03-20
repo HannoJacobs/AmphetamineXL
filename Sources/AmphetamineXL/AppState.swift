@@ -28,6 +28,10 @@ final class AppState {
     private var keepaliveCounter: Int = 0
     private var lastJiggleTime: Date? = nil
 
+    // Display state — only jiggle when display is off (lid closed)
+    // This lets the Mac lock and screen dim normally when the lid is open
+    private var isDisplayAsleep: Bool = false
+
     private let keepaliveHosts = [
         "1.1.1.1",           // Cloudflare DNS
         "8.8.8.8",           // Google DNS
@@ -86,22 +90,21 @@ final class AppState {
         )
         logger.notice("  PreventSystemSleep: \(r2 == kIOReturnSuccess ? "✅" : "❌ error \(r2)")")
 
-        var displayID = IOPMAssertionID(0)
-        let r3 = IOPMAssertionCreateWithName(
-            kIOPMAssertPreventUserIdleDisplaySleep as CFString,
-            IOPMAssertionLevel(kIOPMAssertionLevelOn),
-            reason,
-            &displayID
-        )
-        logger.notice("  PreventUserIdleDisplaySleep: \(r3 == kIOReturnSuccess ? "✅" : "❌ error \(r3)")")
-
         assertionIDIdleSystem = idleID
         assertionIDSystemSleep = systemID
-        assertionIDDisplaySleep = displayID
+
+        // Display assertion only held when lid is closed — lets screen dim/lock when open
+        if isDisplayAsleep {
+            holdDisplayAssertion()
+        }
 
         startCaffeinate()
         startKeepalive()
-        startMouseJiggle()
+        // Mouse jiggle only starts when display sleeps (lid close)
+        // This lets the Mac lock/dim normally when lid is open
+        if isDisplayAsleep {
+            startMouseJiggle()
+        }
 
         isActive = true
         activeSince = Date()
@@ -120,10 +123,9 @@ final class AppState {
 
         IOPMAssertionRelease(assertionIDIdleSystem)
         IOPMAssertionRelease(assertionIDSystemSleep)
-        IOPMAssertionRelease(assertionIDDisplaySleep)
         assertionIDIdleSystem = IOPMAssertionID(0)
         assertionIDSystemSleep = IOPMAssertionID(0)
-        assertionIDDisplaySleep = IOPMAssertionID(0)
+        releaseDisplayAssertion()
 
         stopCaffeinate()
         stopKeepalive()
@@ -152,10 +154,12 @@ final class AppState {
 
         wsnc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
-            logger.critical("🟢 SYSTEM DID WAKE — resuming all timers")
+            logger.critical("🟢 SYSTEM DID WAKE — resuming timers (displayAsleep: \(self.isDisplayAsleep))")
             // Restart everything on wake in case timers got killed
             if self.isActive {
-                self.startMouseJiggle()
+                if self.isDisplayAsleep {
+                    self.startMouseJiggle()
+                }
                 self.startKeepalive()
                 // Make sure caffeinate is still alive
                 if let p = self.caffeinateProcess, !p.isRunning {
@@ -165,15 +169,47 @@ final class AppState {
             }
         }
 
-        wsnc.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { _ in
-            logger.notice("🖥️ DISPLAY SLEEP (lid closed or display off)")
+        wsnc.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            logger.notice("🖥️ DISPLAY SLEEP (lid closed or display off) — starting mouse jiggle + display assertion")
+            self.isDisplayAsleep = true
+            if self.isActive {
+                self.startMouseJiggle()
+                self.holdDisplayAssertion()
+            }
         }
 
-        wsnc.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in
-            logger.notice("🖥️ DISPLAY WAKE (lid opened or display on)")
+        wsnc.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            logger.notice("🖥️ DISPLAY WAKE (lid opened or display on) — stopping mouse jiggle + releasing display assertion")
+            self.isDisplayAsleep = false
+            self.stopMouseJiggle()
+            self.releaseDisplayAssertion()
         }
 
         logger.notice("📡 Registered for sleep/wake/display notifications")
+    }
+
+    // MARK: - Display assertion (only held when lid is closed)
+
+    private func holdDisplayAssertion() {
+        guard assertionIDDisplaySleep == IOPMAssertionID(0) else { return }
+        var displayID = IOPMAssertionID(0)
+        let r = IOPMAssertionCreateWithName(
+            kIOPMAssertPreventUserIdleDisplaySleep as CFString,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn),
+            "AmphetamineXL preventing sleep" as CFString,
+            &displayID
+        )
+        assertionIDDisplaySleep = displayID
+        logger.notice("🖥️ Display assertion HELD: \(r == kIOReturnSuccess ? "✅" : "❌ error \(r)")")
+    }
+
+    private func releaseDisplayAssertion() {
+        guard assertionIDDisplaySleep != IOPMAssertionID(0) else { return }
+        IOPMAssertionRelease(assertionIDDisplaySleep)
+        assertionIDDisplaySleep = IOPMAssertionID(0)
+        logger.notice("🖥️ Display assertion RELEASED — screen can dim/lock")
     }
 
     // MARK: - caffeinate subprocess
