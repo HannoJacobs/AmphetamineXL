@@ -1,96 +1,85 @@
 # AmphetamineXL — Claude Code Briefing
 
-macOS menu bar app that prevents sleep including clamshell lid close on Apple Silicon. Swift SPM, macOS 14+, no Xcode project files. Hanno never opens Xcode — all work is done by agents via CLI.
+macOS menu bar app that prevents Apple Silicon clamshell sleep. Swift SPM, macOS 14+, no Xcode project files. Hanno never opens Xcode — all work is done by agents via CLI.
 
 Full briefing: see `AGENTS.md`. This file is the concise session-start reference.
 
 ---
 
-## How It Works (v2.0)
+## How It Works (v2.1)
 
-**The core fix is CGEvent mouse jiggle.** Every 1 second, posts `CGEventCreateMouseEvent(.mouseMoved)` to move cursor 1px right then back. WindowServer registers this as `UserIsActive` HID activity. The SMC respects HID activity and won't enter clamshell sleep.
+**The core fix is CGEvent mouse jiggle.** Every 1 second (only when lid is closed), posts `CGEventCreateMouseEvent(.mouseMoved)` to move cursor 1px right then back. WindowServer registers this as `UserIsActive` HID activity. The SMC respects HID activity and won't enter clamshell sleep.
 
 This was reverse-engineered from Amphetamine's binary (their "Drive Alive" feature).
 
-IOKit assertions, caffeinate, and pmset are supplementary — they do NOT prevent clamshell sleep on Apple Silicon alone.
+**Do NOT remove the mouse jiggle — it's the only thing that prevents clamshell sleep on Apple Silicon.**
+
+### Lid-Aware Behavior
+
+**Lid open:** 2 IOKit assertions + caffeinate + network keepalive. Screen dims/locks normally. No jiggle.
+
+**Lid closed:** All of the above PLUS auto-lock (ScreenSaverEngine) → display off (`pmset displaysleepnow`) → mouse jiggle (1s) → display assertion held.
+
+**Lid detection:** `AppleClamshellState` via IOKit `IOPMrootDomain`, polled every 2s.
 
 ### Defense Stack
 
-1. CGEvent mouse jiggle (1s) — prevents clamshell sleep
-2. IOKit assertions (x3) — PreventUserIdleSystemSleep + PreventSystemSleep + PreventUserIdleDisplaySleep
+1. CGEvent mouse jiggle (1s, lid closed only) — prevents clamshell sleep
+2. IOKit assertions (x2 open, x3 closed)
 3. caffeinate -s subprocess — kernel-level
 4. Network keepalive (3s) — 5 DNS hosts, UDP + TCP probes
-5. os.log logging — subsystem `com.hannojacobs.AmphetamineXL`
-6. Sleep/wake notification handlers — restart timers on wake
-
-## Stack
-
-- Swift Package Manager — `Package.swift` is the source of truth, no `.xcodeproj`
-- macOS 14+ (Observation framework, MenuBarExtra .window style)
-- Bundle ID: `com.hannojacobs.AmphetamineXL`
-- GitHub: `HannoJacobs/AmphetamineXL`
-- GitHub Pages: `docs/` on `main` → https://hannojacobs.github.io/AmphetamineXL/
+5. Auto-lock + display off on lid close
+6. os.log logging — subsystem `com.hannojacobs.AmphetamineXL`
+7. Sleep/wake notification handlers — restart timers on wake
 
 ## Key Files
 
 | File | Role |
 |---|---|
-| `Package.swift` | SPM manifest |
-| `Sources/AmphetamineXL/AppState.swift` | All logic — CGEvent jiggle, IOKit, caffeinate, keepalive, os.log |
+| `Sources/AmphetamineXL/AppState.swift` | ALL logic — jiggle, IOKit, caffeinate, keepalive, lid detect, lock, logging |
 | `Sources/AmphetamineXL/MenuBarView.swift` | SwiftUI popup |
 | `Sources/AmphetamineXL/AmphetamineXLApp.swift` | @main entry |
-| `create-dmg.sh` | Packages binary → DMG, contains Info.plist with version strings |
-| `.github/workflows/release.yml` | CI — builds + uploads DMG to latest GitHub release |
+| `create-dmg.sh` | DMG packaging, contains Info.plist with **VERSION** (bump here) |
 
-## Build
+## Build + Deploy
 
 ```bash
+# Build
+cd /Users/hannojacobs/Documents/Code/AmphetamineXL && \
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   xcodebuild -scheme AmphetamineXL -configuration Release \
   -destination "platform=macOS" build
+
+# Deploy
+pkill -x AmphetamineXL 2>/dev/null; sleep 1
+BINARY=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Release/AmphetamineXL" -type f 2>/dev/null | head -1)
+cp "$BINARY" /Applications/AmphetamineXL.app/Contents/MacOS/AmphetamineXL
+open /Applications/AmphetamineXL.app
 ```
 
 ## Debugging
 
 ```bash
-# View app logs
 log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 10m
-
-# Check assertions
 pmset -g assertions | grep -E "AmphetamineXL|caffeinate|UserIsActive"
-
-# Check sleep/wake
+/usr/sbin/ioreg -r -k AppleClamshellState | grep AppleClamshellState
 pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20
 ```
 
-## Full Send Deploy (always do ALL steps in order)
+## Full Send Deploy
 
-1. **Bump version** in `create-dmg.sh` — `CFBundleVersion` + `CFBundleShortVersionString`
-2. **Update** `CHANGELOG.md`
-3. **Commit**: `git commit -m "vX.Y: <description>"`
-4. **Create GitHub release BEFORE pushing** (CI uploads DMG to latest release):
-   `gh release create vX.Y --title "vX.Y — <title>" --notes "..."`
-5. **Push**: `git push origin main` (CI builds + uploads DMG)
-6. **Install locally**:
-   ```bash
-   BINARY=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Release/AmphetamineXL" -type f 2>/dev/null | head -1)
-   pkill -x AmphetamineXL 2>/dev/null || true && sleep 1
-   cp "$BINARY" /Applications/AmphetamineXL.app/Contents/MacOS/AmphetamineXL
-   open /Applications/AmphetamineXL.app
-   ```
-7. **Verify**: `pgrep -x AmphetamineXL` (PID) + `gh release view vX.Y` (has DMG asset)
+1. Bump version in `create-dmg.sh` (CFBundleVersion + CFBundleShortVersionString)
+2. Update `CHANGELOG.md`
+3. Update ALL docs that reference version/features (`README.md`, `HANDOFF.md`, `CLAUDE.md`, `AGENTS.md`, `docs/index.html`, `docs/ARCHITECTURE.md`)
+4. Commit: `git add -A && git commit -m "vX.Y: <description>"`
+5. Create release BEFORE push: `gh release create vX.Y --title "vX.Y — <title>" --notes "..."`
+6. Push: `git push origin main`
+7. Deploy locally (see above) + bump Info.plist via PlistBuddy
+8. Verify: `pgrep -x AmphetamineXL` + `gh release view vX.Y`
 
-## Critical Gotchas
+## Critical Rules
 
-**SwiftUI**: Use `onTapGesture` not `Button` in `MenuBarExtra .window` views — `Button` dismisses the popup on click.
-
-**CGEvent**: The mouse jiggle is the ONLY thing that prevents clamshell sleep on Apple Silicon. Without it, everything else fails. Do not remove it.
-
-**CI**: Always create the GitHub release BEFORE pushing. CI finds the latest release by `gh release list` and uploads to it.
-
-**Version**: The version string lives in `create-dmg.sh` (the inline Info.plist), not in `Package.swift`.
-
-## Definition of Done (deploy)
-
-- [ ] `pgrep -x AmphetamineXL` returns a PID on local machine
-- [ ] `gh release view vX.Y` shows `AmphetamineXL.dmg` as an asset
+- **Never remove mouse jiggle** — only thing that prevents clamshell sleep
+- **Use `onTapGesture` not `Button`** in MenuBarExtra .window views
+- **Create GitHub release BEFORE pushing** (CI uploads DMG to latest)
+- **Version lives in `create-dmg.sh`** only

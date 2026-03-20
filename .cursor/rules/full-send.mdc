@@ -6,20 +6,20 @@ alwaysApply: false
 
 # Full Send — AmphetamineXL Deploy Checklist
 
-When the user says "full send", "deploy this", or "fully deploy", execute every step below in order. Do not skip steps. Do not mark done until `pgrep` and `gh release view` both pass.
+When the user says "full send", "deploy this", or "fully deploy", execute every step below in order. Do not skip steps. Do not mark done until verification passes.
 
 ---
 
 ## Pre-flight
 
-- Confirm the new version number (e.g. `v1.1`)
+- Confirm the new version number (e.g. `v2.2`)
 - Confirm a one-line release description
 
 ---
 
 ## Step 1 — Bump version in create-dmg.sh
 
-Open `create-dmg.sh` and update both version strings in the inline `Info.plist` block:
+Update both version strings in the inline `Info.plist`:
 
 ```xml
 <key>CFBundleVersion</key>
@@ -32,30 +32,32 @@ Open `create-dmg.sh` and update both version strings in the inline `Info.plist` 
 
 ## Step 2 — Update CHANGELOG.md
 
-Add a new entry at the top of `CHANGELOG.md`:
-
-```markdown
-## vX.Y — YYYY-MM-DD
-- <change 1>
-- <change 2>
-```
+Add a new entry at the top.
 
 ---
 
-## Step 3 — Commit
+## Step 3 — Update ALL docs
 
-Stage and commit all changes:
+Check and update any files that reference the version or describe features:
+- `README.md`
+- `HANDOFF.md`
+- `CLAUDE.md`
+- `AGENTS.md`
+- `docs/index.html`
+- `docs/ARCHITECTURE.md`
+- `docs/CONTRIBUTING.md`
+
+---
+
+## Step 4 — Commit
 
 ```bash
-git add create-dmg.sh CHANGELOG.md <any other changed files>
-git commit -m "vX.Y: <short description>"
+git add -A && git commit -m "vX.Y: <short description>"
 ```
 
 ---
 
-## Step 4 — Create GitHub release BEFORE pushing
-
-CI uploads the DMG to the most recent release. Create it first:
+## Step 5 — Create GitHub release BEFORE pushing
 
 ```bash
 gh release create vX.Y \
@@ -63,67 +65,45 @@ gh release create vX.Y \
   --notes "- Change one\n- Change two"
 ```
 
-Verify it exists:
-
-```bash
-gh release view vX.Y
-```
-
 ---
 
-## Step 5 — Push to main (triggers CI)
+## Step 6 — Push to main (triggers CI)
 
 ```bash
 git push origin main
 ```
 
-CI workflow (`.github/workflows/release.yml`) will:
-1. Build the Release binary via `xcodebuild`
-2. Run `create-dmg.sh` to package it
-3. Upload `AmphetamineXL.dmg` to the latest GitHub release
-
-Watch CI: `gh run watch` or check GitHub Actions tab.
-
 ---
 
-## Step 6 — Build locally and install
-
-Build:
+## Step 7 — Build and install locally
 
 ```bash
+cd /Users/hannojacobs/Documents/Code/AmphetamineXL && \
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   xcodebuild -scheme AmphetamineXL -configuration Release \
   -destination "platform=macOS" build
-```
-
-Find binary and install:
-
-```bash
-BINARY=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Release/AmphetamineXL" -type f 2>/dev/null | head -1)
-echo "Binary: $BINARY"
 
 pkill -x AmphetamineXL 2>/dev/null || true
 sleep 1
-
+BINARY=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Release/AmphetamineXL" -type f 2>/dev/null | head -1)
 cp "$BINARY" /Applications/AmphetamineXL.app/Contents/MacOS/AmphetamineXL
-
-# Update Info.plist to match new version
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion X.Y" /Applications/AmphetamineXL.app/Contents/Info.plist
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString X.Y" /Applications/AmphetamineXL.app/Contents/Info.plist
-
 open /Applications/AmphetamineXL.app
 ```
 
 ---
 
-## Step 7 — Verify (required — do not skip)
+## Step 8 — Verify (required — do not skip)
 
 ```bash
-pgrep -x AmphetamineXL   # Must print a PID
-gh release view vX.Y      # Must show AmphetamineXL.dmg as an asset
+pgrep -x AmphetamineXL                                          # Must print a PID
+gh release view vX.Y                                              # Must show AmphetamineXL.dmg asset
+pmset -g assertions | grep "AmphetamineXL"                       # Must show assertions
+log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 30s  # Must show init logs
 ```
 
-Both checks must pass. Show the output to the user.
+All checks must pass. Show the output to the user.
 
 ---
 
@@ -132,6 +112,7 @@ Both checks must pass. Show the output to the user.
 | Symptom | Cause | Fix |
 |---|---|---|
 | CI upload fails | Release didn't exist when push happened | Create release first, then push |
-| App doesn't launch | Binary not signed or quarantine flag | `xattr -dr com.apple.quarantine /Applications/AmphetamineXL.app` |
-| `pgrep` returns nothing | Binary crashed on launch | Check Console.app for crash logs |
-| Wrong version shown | Info.plist not updated | Run PlistBuddy commands from Step 6 |
+| App doesn't launch | Quarantine flag | `xattr -cr /Applications/AmphetamineXL.app` |
+| `pgrep` returns nothing | Binary crashed | Check `log show --predicate 'process == "AmphetamineXL"' --last 5m` |
+| Wrong version shown | Info.plist not updated | Run PlistBuddy commands from Step 7 |
+| Git push fails | Token expired | `gh auth login -h github.com` |
