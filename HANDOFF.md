@@ -79,14 +79,22 @@ pgrep -x caffeinate
 
 ---
 
-## Root Cause (current theory)
+## Root Cause (confirmed)
 
 On Apple Silicon with **no external display connected**, macOS treats lid-close as a mandatory hardware event. The SMC forces a brief clamshell sleep regardless of software assertions. This is different from Intel Macs where `caffeinate -s` was sufficient.
 
-Potential real fixes to investigate:
-1. **`sudo pmset -b sleep 0`** — disable sleep entirely on battery. Try this first. Command: `sudo pmset -b sleep 0`. To verify: `pmset -g | grep sleep`
-2. **Connect an external display / dummy HDMI dongle** — Macs in "clamshell mode" with external display connected don't sleep. A ~$5 dummy HDMI plug fools the Mac into thinking a display is connected. Likely the most reliable hardware fix.
-3. **SleepWatcher** — third-party daemon that runs scripts on sleep/wake events via a different kernel hook.
+**IOKit assertions are NOT enough.** The SMC ignores them for clamshell sleep.
+
+## Fix Applied (v1.4 → commit 5a477c0)
+
+**CGEvent mouse jiggle** — reverse-engineered from Amphetamine's binary. Every 4 seconds, the app posts a `CGEventCreateMouseEvent(.mouseMoved)` that moves the cursor 1px right then back. This creates real HID events that register as `UserIsActive` with WindowServer. The SMC respects HID activity and won't enter clamshell sleep.
+
+Evidence from `pmset -g assertions`:
+```
+WindowServer: UserIsActive named: "com.apple.iohideventsystem.queue.tickle.nxevent service:IOHIDSystem pid:XXXX process:AmphetamineXL"
+```
+
+**Needs real-world testing:** Close lid, put in backpack, check if hotspot stays connected without the ~15s sleep gap.
 
 ---
 
