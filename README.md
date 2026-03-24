@@ -25,15 +25,17 @@ AmphetamineXL solves this by posting synthetic mouse events via `CGEventCreateMo
 Download from [Releases](https://github.com/HannoJacobs/AmphetamineXL/releases/latest), drag to Applications, then run:
 
 ```bash
-xattr -cr /Applications/AmphetamineXL.app && open /Applications/AmphetamineXL.app && sudo pmset -a standby 0 hibernatemode 0 autopoweroff 0
+xattr -cr /Applications/AmphetamineXL.app && open /Applications/AmphetamineXL.app
 ```
+
+On first launch, AmphetamineXL will prompt once for your password to set up passwordless pmset access. This is a one-time setup.
 
 That's it. ⚡ appears in menu bar, caffeinated by default. Close your lid — Mac stays awake.
 
 ## Install (build from source)
 
 ```bash
-git clone https://github.com/HannoJacobs/AmphetamineXL && cd AmphetamineXL && xcodebuild -scheme AmphetamineXL -configuration Release -destination 'platform=macOS' build && BINARY=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Release/AmphetamineXL" -type f 2>/dev/null | head -1) && mkdir -p /Applications/AmphetamineXL.app/Contents/MacOS && cp "$BINARY" /Applications/AmphetamineXL.app/Contents/MacOS/AmphetamineXL && xattr -cr /Applications/AmphetamineXL.app && open /Applications/AmphetamineXL.app && sudo pmset -a standby 0 hibernatemode 0 autopoweroff 0
+git clone https://github.com/HannoJacobs/AmphetamineXL && cd AmphetamineXL && xcodebuild -scheme AmphetamineXL -configuration Release -destination 'platform=macOS' build && BINARY=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Release/AmphetamineXL" -type f 2>/dev/null | head -1) && mkdir -p /Applications/AmphetamineXL.app/Contents/MacOS && cp "$BINARY" /Applications/AmphetamineXL.app/Contents/MacOS/AmphetamineXL && xattr -cr /Applications/AmphetamineXL.app && open /Applications/AmphetamineXL.app
 ```
 
 ## Verify
@@ -53,12 +55,6 @@ pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20
 
 # Lid state
 /usr/sbin/ioreg -r -k AppleClamshellState | grep AppleClamshellState
-```
-
-## Revert (re-enable deep sleep)
-
-```bash
-sudo pmset -a standby 1 hibernatemode 3 autopoweroff 1
 ```
 
 ## Usage

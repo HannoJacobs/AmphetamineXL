@@ -59,6 +59,8 @@ final class AppState {
         if savedState {
             enableCaffeine()
         }
+
+        setupSudoersIfNeeded()
     }
 
     func toggle() {
@@ -111,6 +113,7 @@ final class AppState {
         }
 
         isActive = true
+        applyDeepSleepOverride()
         activeSince = Date()
         mouseJiggleCount = 0
         keepaliveCount = 0
@@ -137,12 +140,71 @@ final class AppState {
         stopLidCheck()
 
         isActive = false
+        restoreDeepSleep()
         activeSince = nil
         durationText = "Inactive"
         UserDefaults.standard.set(false, forKey: "amphetamine_active")
 
         stopDurationTimer()
         logger.notice("💤 Caffeine DISABLED")
+    }
+
+    // MARK: - Sudoers setup (one-time, first launch)
+
+    private func setupSudoersIfNeeded() {
+        let sudoersPath = "/etc/sudoers.d/amphetaminexl"
+        guard !FileManager.default.fileExists(atPath: sudoersPath) else {
+            logger.notice("✅ sudoers entry already exists, skipping setup")
+            return
+        }
+
+        logger.notice("🔐 First-launch: requesting sudoers setup")
+
+        let script = """
+            do shell script "echo 'ALL ALL=(ALL) NOPASSWD: /usr/bin/pmset' | sudo tee /etc/sudoers.d/amphetaminexl > /dev/null && sudo chmod 440 /etc/sudoers.d/amphetaminexl" with administrator privileges
+            """
+
+        var error: NSDictionary?
+        let appleScript = NSAppleScript(source: script)
+        appleScript?.executeAndReturnError(&error)
+
+        if let error = error {
+            logger.error("❌ sudoers setup failed: \(error)")
+        } else {
+            logger.notice("✅ sudoers entry created — sudo pmset will work passwordlessly")
+        }
+    }
+
+    // MARK: - Deep sleep pmset overrides
+
+    private func applyDeepSleepOverride() {
+        DispatchQueue.global(qos: .utility).async {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+            p.arguments = ["/usr/bin/pmset", "-a", "standby", "0", "hibernatemode", "0", "autopoweroff", "0"]
+            do {
+                try p.run()
+                p.waitUntilExit()
+                logger.notice("🔧 pmset deep sleep disabled (exit \(p.terminationStatus))")
+            } catch {
+                logger.error("❌ pmset override failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func restoreDeepSleep() {
+        DispatchQueue.global(qos: .utility).async {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+            p.arguments = ["/usr/bin/pmset", "-a", "standby", "1", "hibernatemode", "3", "autopoweroff", "1"]
+            do {
+                try p.run()
+                p.waitUntilExit()
+                logger.notice("🔧 pmset deep sleep restored (exit \(p.terminationStatus))")
+            } catch {
+                logger.error("❌ pmset restore failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - Sleep/Wake notifications

@@ -1,6 +1,14 @@
 # Changelog
 
-## v2.1 — 2026-03-20 (current)
+## v2.2 — 2026-03-24 (current)
+> Automatic deep sleep management — pmset handled by the app, not the user.
+
+### What changed
+- **One-time sudoers setup:** On first launch, prompts once for password to create `/etc/sudoers.d/amphetaminexl` (grants passwordless `sudo pmset` only). Never stores your password.
+- **pmset on toggle:** When caffeine turns ON, disables deep sleep (standby 0, hibernatemode 0, autopoweroff 0). When caffeine turns OFF, restores macOS defaults (standby 1, hibernatemode 3, autopoweroff 1).
+- **No manual setup:** Removed `sudo pmset` from install command - the app manages it automatically.
+
+## v2.1 — 2026-03-20
 > Smart lid handling — jiggle, lock, and display off only when lid is closed.
 
 ### What changed
