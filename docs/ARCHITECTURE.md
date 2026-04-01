@@ -56,9 +56,9 @@ AmphetamineXL uses 5 simultaneous layers, but **only the first one actually prev
 |-------|----------|---------|
 | **CGEvent mouse jiggle** | 1s | **THE FIX** — prevents clamshell sleep via HID activity |
 | IOKit assertions (x3) | Always held | Prevents idle sleep, system sleep, display sleep |
-| caffeinate -s subprocess | Always running | Kernel-level sleep prevention (backup) |
+| caffeinate -s -w <app pid> | Always running while active | Kernel-level sleep prevention with automatic child cleanup |
 | Network keepalive | 3s | Keeps hotspot/Wi-Fi alive (5 DNS hosts, UDP + TCP) |
-| pmset overrides | System-level | Disables deep standby/hibernate |
+| pmset profiles | Session-owned | Applies `fixed-default` or `legacy-max-awake` values and restores exact previous values |
 
 ### IOKit Assertions Held
 
@@ -79,17 +79,21 @@ Each tick does:
 
 Varied targets prevent any single host from rate-limiting and make traffic patterns look natural.
 
-### pmset System Settings (one-time, requires sudo)
+### pmset Ownership and Rollback
 
-```bash
-sudo pmset -a standby 0 && sudo pmset -a hibernatemode 0 && sudo pmset -a autopoweroff 0
-```
+AmphetamineXL now snapshots the exact `pmset` values it owns before changing them. On disable, quit, termination, or crash recovery, it restores those exact values instead of assuming defaults.
+
+- `fixed-default` owns `standby`, `hibernatemode`, and `autopoweroff` where supported
+- `legacy-max-awake` adds `sleep`, `displaysleep`, and `disablesleep`
+- The active profile is stored in a hidden `wakeProfile` user default
+- Recovery runs before auto-enable so stale `pmset` state is cleaned up before a new session starts
 
 ## Logging
 
-Full `os.log` integration:
+Dual logging:
 - **Subsystem:** `com.hannojacobs.AmphetamineXL`
 - **Category:** `SleepPrevention`
+- **Persistent file logs:** `~/Library/Application Support/AmphetamineXL/Logs/`
 
 ```bash
 log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 10m
@@ -97,13 +101,18 @@ log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 10m
 
 Events logged:
 - 🚀 App init
+- Session ID, wake profile, saved desired state, app/build version
+- Full startup snapshots: `pmset -g`, `pmset -g custom`, `pmset -g assertions`, `pmset -g live`, related processes
 - ⚡ Caffeine enable/disable with assertion results
+- Exact `pmset` reads, applies, restores, exit codes, stdout, stderr
 - 🛑 `willSleep` — CRITICAL, means the jiggle failed
 - 🟢 `didWake` — restarts all timers
 - 🖥️ `screensDidSleep` / `screensDidWake` — display/lid events
 - 🖱️ Jiggle count every 60 ticks (~1 min)
 - 🌐 Keepalive count every 100 ticks (~5 min)
-- ☕ caffeinate start/stop/death detection
+- ☕ caffeinate start/stop/death detection and stale-PID recovery
+- 30-second heartbeats with current power-profile state
+- Anomaly dumps with the recent trace buffer attached
 
 ## Sleep/Wake Notification Handling
 

@@ -1,11 +1,23 @@
 # Changelog
 
-## v2.2 — 2026-03-24 (current)
+## v2.3 — 2026-04-01 (current)
+> Leak-proof wake stack, hidden legacy rollback profile, and persistent diagnostics.
+
+### What changed
+- **Crash-safe caffeinate:** Replaced the raw helper with `caffeinate -s -w <app pid>` so it follows the app lifecycle and no longer survives normal app exits or crashes.
+- **Single shutdown path:** Disable, menu quit, app termination, and launch recovery now all use the same teardown logic. Assertions, timers, `caffeinate`, and app-owned `pmset` state are cleaned up in one place.
+- **Session recovery:** On launch, the app loads the previous session state, kills any recorded stale `caffeinate`, restores app-owned `pmset` keys after unclean exits, and logs the entire recovery pass before re-enabling caffeine.
+- **Power profiles:** Added hidden `wakeProfile` support with `fixed-default` as the default and `legacy-max-awake` as the built-in rollback profile. The legacy profile can reapply the more aggressive `sleep 0`, `displaysleep 0`, and `disablesleep 1` behavior while still keeping the new cleanup logic.
+- **Owned pmset restore:** The app now snapshots the exact per-source values it changes and restores those exact values instead of assuming system defaults.
+- **Persistent diagnostics:** Added rotating file logs in `~/Library/Application Support/AmphetamineXL/Logs/` alongside `os.log`, 30-second heartbeats, startup snapshots, anomaly dumps, command stdout/stderr capture, and a menu action to open the logs immediately.
+- **Rollback artifacts:** The app writes a baseline snapshot in Application Support so future investigations can compare current state to the first fixed-build launch state.
+
+## v2.2 — 2026-03-24
 > Automatic deep sleep management — pmset handled by the app, not the user.
 
 ### What changed
 - **One-time sudoers setup:** On first launch, prompts once for password to create `/etc/sudoers.d/amphetaminexl` (grants passwordless `sudo pmset` only). Never stores your password.
-- **pmset on toggle:** When caffeine turns ON, disables deep sleep (standby 0, hibernatemode 0, autopoweroff 0). When caffeine turns OFF, restores macOS defaults (standby 1, hibernatemode 3, autopoweroff 1).
+- **pmset on toggle:** When caffeine turns ON, disables deep sleep (standby 0, hibernatemode 0, autopoweroff 0 where supported). When caffeine turns OFF, restores the exact values the app replaced.
 - **No manual setup:** Removed `sudo pmset` from install command - the app manages it automatically.
 
 ## v2.1 — 2026-03-20

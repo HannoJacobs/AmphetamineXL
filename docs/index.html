@@ -235,7 +235,7 @@
         </svg>
         Download for Mac
       </a>
-      <p class="sub">Open source &nbsp;·&nbsp; <span id="release-version">v2.1</span> &nbsp;·&nbsp; &lt;1 MB</p>
+      <p class="sub">Open source &nbsp;·&nbsp; <span id="release-version">v2.3</span> &nbsp;·&nbsp; &lt;1 MB</p>
     </div>
 
     <div class="features">
@@ -264,14 +264,14 @@
     <div class="section">
       <h2>Install (DMG)</h2>
       <p>Download the DMG above, drag to Applications, then run this one command:</p>
-      <div class="code-block" onclick="copyCode(this)">xattr -cr /Applications/AmphetamineXL.app && open /Applications/AmphetamineXL.app && sudo pmset -a standby 0 hibernatemode 0 autopoweroff 0</div>
-      <p style="color:#555;font-size:0.8rem">Clears macOS quarantine, launches the app, and disables deep standby (one-time, needs password). Done.</p>
+      <div class="code-block" onclick="copyCode(this)">xattr -cr /Applications/AmphetamineXL.app && open /Applications/AmphetamineXL.app</div>
+      <p style="color:#555;font-size:0.8rem">Clears macOS quarantine and launches the app. On first launch, AmphetamineXL prompts once to configure passwordless pmset access for its owned power-profile keys.</p>
     </div>
 
     <div class="section">
       <h2>Install (build from source)</h2>
-      <div class="code-block" onclick="copyCode(this)">git clone https://github.com/HannoJacobs/AmphetamineXL && cd AmphetamineXL && xcodebuild -scheme AmphetamineXL -configuration Release -destination 'platform=macOS' build && BINARY=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Release/AmphetamineXL" -type f 2>/dev/null | head -1) && mkdir -p /Applications/AmphetamineXL.app/Contents/MacOS && cp "$BINARY" /Applications/AmphetamineXL.app/Contents/MacOS/AmphetamineXL && xattr -cr /Applications/AmphetamineXL.app && open /Applications/AmphetamineXL.app && sudo pmset -a standby 0 hibernatemode 0 autopoweroff 0</div>
-      <p style="color:#555;font-size:0.8rem">Clones, builds, installs, launches, and configures standby — all in one paste.</p>
+      <div class="code-block" onclick="copyCode(this)">git clone https://github.com/HannoJacobs/AmphetamineXL && cd AmphetamineXL && xcodebuild -scheme AmphetamineXL -configuration Release -destination 'platform=macOS' build && BINARY=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Release/AmphetamineXL" -type f 2>/dev/null | head -1) && mkdir -p /Applications/AmphetamineXL.app/Contents/MacOS && cp "$BINARY" /Applications/AmphetamineXL.app/Contents/MacOS/AmphetamineXL && xattr -cr /Applications/AmphetamineXL.app && open /Applications/AmphetamineXL.app</div>
+      <p style="color:#555;font-size:0.8rem">Clones, builds, installs, and launches. The app handles its own supported pmset changes after first-launch authorization.</p>
     </div>
 
     <div class="section">
@@ -281,13 +281,13 @@
       <div class="code-block" onclick="copyCode(this)">pgrep -x AmphetamineXL && pmset -g assertions | grep -E "AmphetamineXL|UserIsActive" && pmset -g | grep -E "standby|hibernatemode|autopoweroff"</div>
 
       <div class="step-label">View app logs</div>
-      <div class="code-block" onclick="copyCode(this)">log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 10m</div>
+      <div class="code-block" onclick="copyCode(this)">log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 10m && open ~/Library/Application\ Support/AmphetamineXL/Logs</div>
 
       <div class="step-label">Check sleep/wake history + lid state</div>
       <div class="code-block" onclick="copyCode(this)">pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20 && /usr/sbin/ioreg -r -k AppleClamshellState | grep AppleClamshellState</div>
 
-      <div class="step-label">Revert standby settings</div>
-      <div class="code-block" onclick="copyCode(this)">sudo pmset -a standby 1 hibernatemode 3 autopoweroff 1</div>
+      <div class="step-label">Fallback to legacy max-awake mode</div>
+      <div class="code-block" onclick="copyCode(this)">defaults write com.hannojacobs.AmphetamineXL wakeProfile legacy-max-awake</div>
     </div>
 
     <div class="section">
@@ -302,7 +302,7 @@
         <tr><td>🖱️ Mouse jiggle</td><td>1s</td><td>Prevents clamshell sleep (the key fix)</td></tr>
         <tr><td>🔒 Auto-lock</td><td>On lid close</td><td>Locks screen + kills display</td></tr>
         <tr><td>🔋 IOKit assertions</td><td>Always</td><td>Prevents idle + system sleep</td></tr>
-        <tr><td>☕ caffeinate -s</td><td>Always</td><td>Kernel-level sleep prevention</td></tr>
+        <tr><td>☕ caffeinate -s -w &lt;app pid&gt;</td><td>Always while active</td><td>Kernel-level sleep prevention that dies automatically with the app</td></tr>
         <tr><td>🌐 Network keepalive</td><td>3s</td><td>5 DNS hosts, UDP + TCP probes</td></tr>
       </table>
     </div>

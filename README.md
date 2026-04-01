@@ -47,8 +47,11 @@ pgrep -x AmphetamineXL && pmset -g assertions | grep -E "AmphetamineXL|UserIsAct
 ## Debug
 
 ```bash
-# App logs (lid events, jiggle counts, lock events, assertion results)
+# App logs in macOS unified logging
 log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 10m
+
+# Persistent rotating log files
+open ~/Library/Application\\ Support/AmphetamineXL/Logs
 
 # Sleep/wake history
 pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20
@@ -65,6 +68,22 @@ pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20
 
 **Lid closed:** screen locks → display off → mouse jiggle active → Mac stays awake
 **Lid open:** screen dims/locks normally, no jiggle interference
+
+## Recovery + Rollback
+
+- Baseline rollback artifacts live in `~/Library/Application Support/AmphetamineXL/Rollback/`
+- Session diagnostics live in `~/Library/Application Support/AmphetamineXL/Logs/`
+- Hidden rollback mode:
+
+```bash
+defaults write com.hannojacobs.AmphetamineXL wakeProfile legacy-max-awake
+```
+
+- Return to the default fixed profile:
+
+```bash
+defaults delete com.hannojacobs.AmphetamineXL wakeProfile
+```
 
 ## License
 

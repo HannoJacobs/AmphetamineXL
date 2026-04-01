@@ -1,10 +1,8 @@
-import SwiftUI
+import Darwin
 import IOKit
 import IOKit.pwr_mgt
 import CoreGraphics
-import os.log
-
-private let logger = Logger(subsystem: "com.hannojacobs.AmphetamineXL", category: "SleepPrevention")
+import SwiftUI
 
 @Observable
 @MainActor
@@ -13,54 +11,93 @@ final class AppState {
     private(set) var activeSince: Date? = nil
     private(set) var durationText: String = "Inactive"
 
-    private var assertionIDIdleSystem: IOPMAssertionID = IOPMAssertionID(0)
-    private var assertionIDSystemSleep: IOPMAssertionID = IOPMAssertionID(0)
-    private var assertionIDDisplaySleep: IOPMAssertionID = IOPMAssertionID(0)
-    private var durationTimer: Timer? = nil
+    private var assertionIDIdleSystem = IOPMAssertionID(0)
+    private var assertionIDSystemSleep = IOPMAssertionID(0)
+    private var assertionIDDisplaySleep = IOPMAssertionID(0)
 
-    private var caffeinateProcess: Process? = nil
-    private var keepaliveTimer: Timer? = nil
-    private var mouseJiggleTimer: Timer? = nil
+    private var durationTimer: Timer?
+    private var heartbeatTimer: Timer?
+    private var keepaliveTimer: Timer?
+    private var mouseJiggleTimer: Timer?
+    private var lidCheckTimer: Timer?
 
-    // Track stats for debugging
-    private var mouseJiggleCount: Int = 0
-    private var keepaliveCount: Int = 0
-    private var keepaliveCounter: Int = 0
-    private var lastJiggleTime: Date? = nil
+    private var caffeinateProcess: Process?
+    private var mouseJiggleCount = 0
+    private var keepaliveCount = 0
+    private var keepaliveCounter = 0
+    private var lastJiggleTime: Date?
+    private var isDisplayAsleep = false
+    private var isShuttingDownWakeStack = false
+    private var terminationHandled = false
+    private var notificationObservers: [NSObjectProtocol] = []
 
-    // Display state — only jiggle when display is off (lid closed)
-    // This lets the Mac lock and screen dim normally when the lid is open
-    private var isDisplayAsleep: Bool = false
+    private var sessionState: AppSessionState
 
-    // Lid state polling — backup for screensDidSleep which can be unreliable
-    private var lidCheckTimer: Timer? = nil
-
+    private let diagnostics = DiagnosticsLogger.shared
+    private let sessionStore = SessionStateStore()
+    private let commandRunner = CommandRunner.shared
     private let keepaliveHosts = [
-        "1.1.1.1",           // Cloudflare DNS
-        "8.8.8.8",           // Google DNS
-        "9.9.9.9",           // Quad9 DNS
-        "208.67.222.222",    // OpenDNS
-        "1.0.0.1",           // Cloudflare secondary
+        "1.1.1.1",
+        "8.8.8.8",
+        "9.9.9.9",
+        "208.67.222.222",
+        "1.0.0.1",
     ]
+    private let powerProfileManager: PowerProfileManager
 
     var menuBarIcon: String {
         isActive ? "bolt.fill" : "bolt.slash"
     }
 
     init() {
-        logger.notice("🚀 AmphetamineXL initializing")
-
-        // Register for sleep/wake notifications
-        registerSleepWakeNotifications()
-
+        let previousState = sessionStore.load()
         let hasSetPref = UserDefaults.standard.object(forKey: "amphetamine_active") != nil
-        let savedState = hasSetPref ? UserDefaults.standard.bool(forKey: "amphetamine_active") : true
-        logger.notice("📋 Saved state: \(savedState), hasSetPref: \(hasSetPref)")
-        if savedState {
-            enableCaffeine()
-        }
+        let savedDesiredState = previousState?.desiredActiveOnLaunch
+            ?? (hasSetPref ? UserDefaults.standard.bool(forKey: "amphetamine_active") : true)
+        let resolvedProfile = WakeProfile.resolved()
+        let newSessionID = UUID().uuidString
+
+        sessionState = AppSessionState(
+            sessionID: newSessionID,
+            profile: resolvedProfile,
+            desiredActiveOnLaunch: savedDesiredState,
+            shutdownClean: false,
+            caffeinatePID: nil,
+            ownedPmsetKeys: [],
+            ownedPmsetPreviousValues: [:],
+            lastShutdownReason: nil,
+            lastKnownLidState: nil,
+            lastEventNumber: 0,
+            lastLogFilePath: nil,
+            startedAt: isoTimestamp(Date())
+        )
+
+        diagnostics.configure(sessionID: newSessionID)
+        powerProfileManager = PowerProfileManager(diagnostics: diagnostics)
+
+        diagnostics.notice("AmphetamineXL initializing version=\(currentAppVersion()) build=\(currentBuildVersion()) pid=\(ProcessInfo.processInfo.processIdentifier)")
+        diagnostics.notice("Launch settings: desiredActiveOnLaunch=\(savedDesiredState) hasLegacyUserDefault=\(hasSetPref) wakeProfile=\(resolvedProfile.rawValue)")
+        diagnostics.notice("Launch at login enabled=\(currentLaunchAtLoginState())")
+
+        persistSessionState()
+        sessionStore.saveBaselineSnapshotIfMissing(sessionID: newSessionID, profile: resolvedProfile, diagnostics: diagnostics, commandRunner: commandRunner)
+        captureStartupDiagnostics(stage: "pre-recovery", previousState: previousState)
 
         setupSudoersIfNeeded()
+        recoverPreviousSession(previousState)
+
+        registerSleepWakeNotifications()
+        isDisplayAsleep = isLidClosed()
+        sessionState.lastKnownLidState = isDisplayAsleep
+        diagnostics.notice("Initial lid state closed=\(isDisplayAsleep)")
+        persistSessionState()
+        captureStartupDiagnostics(stage: "post-recovery", previousState: previousState)
+
+        if savedDesiredState {
+            enableCaffeine()
+        } else {
+            updateDurationText()
+        }
     }
 
     func toggle() {
@@ -71,95 +108,255 @@ final class AppState {
         }
     }
 
+    func prepareForQuit() {
+        diagnostics.notice("Menu requested app quit")
+        terminationHandled = true
+        shutdown(reason: .menuQuit, desiredActiveOverride: sessionState.desiredActiveOnLaunch)
+    }
+
+    func handleApplicationShouldTerminate(_ app: NSApplication) -> NSApplication.TerminateReply {
+        if terminationHandled {
+            diagnostics.notice("applicationShouldTerminate arrived after termination was already handled")
+            return .terminateNow
+        }
+
+        diagnostics.notice("Handling applicationShouldTerminate with terminateLater")
+        terminationHandled = true
+        let desiredActiveOnLaunch = sessionState.desiredActiveOnLaunch
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                app.reply(toApplicationShouldTerminate: true)
+                return
+            }
+
+            self.shutdown(reason: .willTerminate, desiredActiveOverride: desiredActiveOnLaunch)
+            self.diagnostics.notice("Replying to applicationShouldTerminate after cleanup finished")
+            app.reply(toApplicationShouldTerminate: true)
+        }
+
+        return .terminateLater
+    }
+
+    func handleAppWillTerminate() {
+        if terminationHandled {
+            diagnostics.notice("applicationWillTerminate arrived after termination was already handled")
+            return
+        }
+
+        diagnostics.warning("applicationWillTerminate arrived without prior applicationShouldTerminate handling")
+    }
+
+    func openDiagnosticsLogs() {
+        diagnostics.notice("Opening diagnostics logs in Finder")
+        diagnostics.openCurrentLogInFinder()
+    }
+
     func enableCaffeine() {
-        guard !isActive else { return }
-        logger.notice("⚡ Enabling caffeine — creating assertions")
+        guard !isActive else {
+            diagnostics.notice("enableCaffeine ignored because the wake stack is already active")
+            return
+        }
+
+        isShuttingDownWakeStack = false
+        sessionState.desiredActiveOnLaunch = true
+        sessionState.shutdownClean = false
+        sessionState.lastShutdownReason = nil
+        UserDefaults.standard.set(true, forKey: "amphetamine_active")
+
+        diagnostics.notice("Enabling wake stack with profile \(sessionState.profile.rawValue)")
+        diagnostics.trace("enable start profile=\(sessionState.profile.rawValue) displayAsleep=\(isDisplayAsleep)")
 
         let reason = "AmphetamineXL preventing sleep" as CFString
 
         var idleID = IOPMAssertionID(0)
-        let r1 = IOPMAssertionCreateWithName(
+        let idleResult = IOPMAssertionCreateWithName(
             kIOPMAssertPreventUserIdleSystemSleep as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
             reason,
             &idleID
         )
-        logger.notice("  PreventUserIdleSystemSleep: \(r1 == kIOReturnSuccess ? "✅" : "❌ error \(r1)")")
+        diagnostics.notice("PreventUserIdleSystemSleep result=\(idleResult)")
 
         var systemID = IOPMAssertionID(0)
-        let r2 = IOPMAssertionCreateWithName(
+        let systemResult = IOPMAssertionCreateWithName(
             kIOPMAssertionTypePreventSystemSleep as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
             reason,
             &systemID
         )
-        logger.notice("  PreventSystemSleep: \(r2 == kIOReturnSuccess ? "✅" : "❌ error \(r2)")")
+        diagnostics.notice("PreventSystemSleep result=\(systemResult)")
 
         assertionIDIdleSystem = idleID
         assertionIDSystemSleep = systemID
 
-        // Display assertion only held when lid is closed — lets screen dim/lock when open
         if isDisplayAsleep {
             holdDisplayAssertion()
         }
 
+        powerProfileManager.apply(profile: sessionState.profile, sessionState: &sessionState)
         startCaffeinate()
         startKeepalive()
         startLidCheck()
-        // Mouse jiggle only starts when display sleeps (lid close)
-        // This lets the Mac lock/dim normally when lid is open
         if isDisplayAsleep {
             startMouseJiggle()
         }
 
         isActive = true
-        applyDeepSleepOverride()
         activeSince = Date()
         mouseJiggleCount = 0
         keepaliveCount = 0
-        UserDefaults.standard.set(true, forKey: "amphetamine_active")
+        keepaliveCounter = 0
 
         updateDurationText()
         startDurationTimer()
-        logger.notice("⚡ Caffeine ENABLED — all systems go")
+        startHeartbeatTimer()
+        persistSessionState()
+        diagnostics.notice("Wake stack enabled successfully")
+        emitHeartbeat(reason: "post-enable")
     }
 
     func disableCaffeine() {
-        guard isActive else { return }
-        logger.notice("💤 Disabling caffeine")
-
-        IOPMAssertionRelease(assertionIDIdleSystem)
-        IOPMAssertionRelease(assertionIDSystemSleep)
-        assertionIDIdleSystem = IOPMAssertionID(0)
-        assertionIDSystemSleep = IOPMAssertionID(0)
-        releaseDisplayAssertion()
-
-        stopCaffeinate()
-        stopKeepalive()
-        stopMouseJiggle()
-        stopLidCheck()
-
-        isActive = false
-        restoreDeepSleep()
-        activeSince = nil
-        durationText = "Inactive"
-        UserDefaults.standard.set(false, forKey: "amphetamine_active")
-
-        stopDurationTimer()
-        logger.notice("💤 Caffeine DISABLED")
+        diagnostics.notice("User requested wake stack disable")
+        shutdown(reason: .toggleOff, desiredActiveOverride: false)
     }
 
-    // MARK: - Sudoers setup (one-time, first launch)
+    private func shutdown(reason: ShutdownReason, desiredActiveOverride: Bool?) {
+        if isShuttingDownWakeStack {
+            diagnostics.notice("shutdown ignored because shutdown is already in progress reason=\(reason.rawValue)")
+            return
+        }
+
+        isShuttingDownWakeStack = true
+        diagnostics.notice("Shutting down wake stack reason=\(reason.rawValue) desiredActiveOverride=\(String(describing: desiredActiveOverride)) active=\(isActive)")
+        diagnostics.trace("shutdown start reason=\(reason.rawValue)")
+
+        if let desiredActiveOverride {
+            sessionState.desiredActiveOnLaunch = desiredActiveOverride
+            UserDefaults.standard.set(desiredActiveOverride, forKey: "amphetamine_active")
+        }
+
+        releaseSystemAssertions()
+        stopMouseJiggle()
+        stopKeepalive()
+        stopLidCheck()
+        stopDurationTimer()
+        stopHeartbeatTimer()
+        stopCaffeinate()
+        powerProfileManager.restore(sessionState: &sessionState, reason: reason)
+
+        isActive = false
+        activeSince = nil
+        durationText = "Inactive"
+        sessionState.shutdownClean = true
+        sessionState.lastShutdownReason = reason
+        sessionState.lastKnownLidState = isDisplayAsleep
+        persistSessionState()
+
+        diagnostics.notice("Wake stack shutdown complete reason=\(reason.rawValue)")
+        isShuttingDownWakeStack = false
+    }
+
+    private func persistSessionState() {
+        sessionState.lastEventNumber = diagnostics.currentEventNumber
+        sessionState.lastLogFilePath = diagnostics.currentLogFilePath
+        sessionStore.save(sessionState)
+    }
+
+    private func recoverPreviousSession(_ previousState: AppSessionState?) {
+        guard var previousState else {
+            diagnostics.notice("No previous session state found for launch recovery")
+            return
+        }
+
+        diagnostics.notice(
+            "Loaded previous session id=\(previousState.sessionID) clean=\(previousState.shutdownClean) " +
+            "desiredActive=\(previousState.desiredActiveOnLaunch) profile=\(previousState.profile.rawValue) " +
+            "recordedCaffeinatePID=\(String(describing: previousState.caffeinatePID))"
+        )
+
+        if let recordedPID = previousState.caffeinatePID {
+            if processExists(pid: recordedPID) {
+                diagnostics.anomaly("Recorded caffeinate PID \(recordedPID) survived into a new launch; terminating it during recovery")
+                terminatePID(recordedPID, label: "recovery caffeinate")
+            } else {
+                diagnostics.notice("Recorded caffeinate PID \(recordedPID) is no longer running")
+            }
+        }
+
+        logRelevantProcesses(label: "launch recovery process scan")
+
+        if !previousState.shutdownClean {
+            diagnostics.anomaly("Previous session ended uncleanly; restoring any owned pmset values before continuing")
+            powerProfileManager.restore(sessionState: &previousState, reason: .launchRecovery)
+            previousState.shutdownClean = true
+            previousState.lastShutdownReason = .launchRecovery
+            previousState.caffeinatePID = nil
+            sessionStore.save(previousState)
+        }
+    }
+
+    private func captureStartupDiagnostics(stage: String, previousState: AppSessionState?) {
+        let previousSummary: String
+        if let previousState {
+            previousSummary = "previousSession id=\(previousState.sessionID) clean=\(previousState.shutdownClean) desiredActive=\(previousState.desiredActiveOnLaunch) profile=\(previousState.profile.rawValue) lastReason=\(String(describing: previousState.lastShutdownReason?.rawValue))"
+        } else {
+            previousSummary = "previousSession none"
+        }
+
+        let body = [
+            "stage=\(stage)",
+            "appVersion=\(currentAppVersion())",
+            "buildVersion=\(currentBuildVersion())",
+            "pid=\(ProcessInfo.processInfo.processIdentifier)",
+            "sessionID=\(sessionState.sessionID)",
+            "wakeProfile=\(sessionState.profile.rawValue)",
+            "desiredActiveOnLaunch=\(sessionState.desiredActiveOnLaunch)",
+            "launchAtLogin=\(currentLaunchAtLoginState())",
+            previousSummary,
+            "pmset -g:",
+            commandSnapshot("/usr/bin/pmset", ["-g"]),
+            "pmset -g custom:",
+            commandSnapshot("/usr/bin/pmset", ["-g", "custom"]),
+            "pmset -g assertions:",
+            commandSnapshot("/usr/bin/pmset", ["-g", "assertions"]),
+            "pmset -g live:",
+            commandSnapshot("/usr/bin/pmset", ["-g", "live"]),
+            "processes:",
+            commandSnapshot("/usr/bin/pgrep", ["-fal", "AmphetamineXL|caffeinate|ScreenSaverEngine"]),
+        ].joined(separator: "\n")
+
+        diagnostics.logMultiline(.notice, title: "startup diagnostics \(stage)", body: body)
+    }
+
+    private func commandSnapshot(_ executablePath: String, _ arguments: [String]) -> String {
+        do {
+            let result = try commandRunner.run(executablePath, arguments: arguments)
+            if result.combinedOutput.isEmpty {
+                return "exit \(result.terminationStatus)"
+            }
+            return "exit \(result.terminationStatus)\n\(result.combinedOutput)"
+        } catch {
+            return "failed to launch: \(error.localizedDescription)"
+        }
+    }
+
+    private func logRelevantProcesses(label: String) {
+        diagnostics.logMultiline(
+            .notice,
+            title: label,
+            body: commandSnapshot("/usr/bin/pgrep", ["-fal", "AmphetamineXL|caffeinate|ScreenSaverEngine"])
+        )
+    }
 
     private func setupSudoersIfNeeded() {
         let sudoersPath = "/etc/sudoers.d/amphetaminexl"
         guard !FileManager.default.fileExists(atPath: sudoersPath) else {
-            logger.notice("✅ sudoers entry already exists, skipping setup")
+            diagnostics.notice("sudoers entry already exists at \(sudoersPath)")
             return
         }
 
-        logger.notice("🔐 First-launch: requesting sudoers setup")
-
+        diagnostics.notice("Requesting first-launch sudoers setup for passwordless pmset access")
         let script = """
             do shell script "echo 'ALL ALL=(ALL) NOPASSWD: /usr/bin/pmset' | sudo tee /etc/sudoers.d/amphetaminexl > /dev/null && sudo chmod 440 /etc/sudoers.d/amphetaminexl" with administrator privileges
             """
@@ -168,133 +365,136 @@ final class AppState {
         let appleScript = NSAppleScript(source: script)
         appleScript?.executeAndReturnError(&error)
 
-        if let error = error {
-            logger.error("❌ sudoers setup failed: \(error)")
+        if let error {
+            diagnostics.error("sudoers setup failed: \(error)")
         } else {
-            logger.notice("✅ sudoers entry created — sudo pmset will work passwordlessly")
+            diagnostics.notice("sudoers entry created successfully")
         }
     }
-
-    // MARK: - Deep sleep pmset overrides
-
-    private func applyDeepSleepOverride() {
-        DispatchQueue.global(qos: .utility).async {
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-            p.arguments = ["/usr/bin/pmset", "-a", "standby", "0", "hibernatemode", "0", "autopoweroff", "0"]
-            do {
-                try p.run()
-                p.waitUntilExit()
-                logger.notice("🔧 pmset deep sleep disabled (exit \(p.terminationStatus))")
-            } catch {
-                logger.error("❌ pmset override failed: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    private func restoreDeepSleep() {
-        DispatchQueue.global(qos: .utility).async {
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-            p.arguments = ["/usr/bin/pmset", "-a", "standby", "1", "hibernatemode", "3", "autopoweroff", "1"]
-            do {
-                try p.run()
-                p.waitUntilExit()
-                logger.notice("🔧 pmset deep sleep restored (exit \(p.terminationStatus))")
-            } catch {
-                logger.error("❌ pmset restore failed: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    // MARK: - Sleep/Wake notifications
 
     private func registerSleepWakeNotifications() {
-        let wsnc = NSWorkspace.shared.notificationCenter
+        let notificationCenter = NSWorkspace.shared.notificationCenter
 
-        wsnc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self else { return }
-            logger.critical("🛑 SYSTEM WILL SLEEP — jiggle count: \(self.mouseJiggleCount), keepalive count: \(self.keepaliveCount), last jiggle: \(self.lastJiggleTime?.description ?? "never")")
-            // Try one last-ditch mouse event
-            self.postMouseJiggle(label: "last-ditch-before-sleep")
-        }
-
-        wsnc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self else { return }
-            logger.critical("🟢 SYSTEM DID WAKE — resuming timers (displayAsleep: \(self.isDisplayAsleep))")
-            // Restart everything on wake in case timers got killed
-            if self.isActive {
-                if self.isDisplayAsleep {
-                    self.startMouseJiggle()
-                }
-                self.startKeepalive()
-                // Make sure caffeinate is still alive
-                if let p = self.caffeinateProcess, !p.isRunning {
-                    logger.warning("⚠️ caffeinate died during sleep — restarting")
-                    self.startCaffeinate()
+        notificationObservers.append(
+            notificationCenter.addObserver(
+                forName: NSWorkspace.willSleepNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.diagnostics.anomaly(
+                        "SYSTEM WILL SLEEP mouseJiggleCount=\(self.mouseJiggleCount) keepaliveCount=\(self.keepaliveCount) " +
+                        "lastJiggle=\(self.lastJiggleTime.map(isoTimestamp) ?? "never")"
+                    )
+                    self.postMouseJiggle(label: "last-ditch-before-sleep")
                 }
             }
-        }
+        )
 
-        wsnc.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self else { return }
-            logger.notice("🖥️ DISPLAY SLEEP (lid closed or display off) — locking screen, then starting jiggle")
-            self.isDisplayAsleep = true
-            if self.isActive {
-                // Lock the screen BEFORE starting the jiggle
-                // Mouse jiggle won't bypass the lock — it just shows the login prompt
-                self.lockScreen()
-                self.startMouseJiggle()
-                self.holdDisplayAssertion()
+        notificationObservers.append(
+            notificationCenter.addObserver(
+                forName: NSWorkspace.didWakeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.diagnostics.anomaly("SYSTEM DID WAKE displayAsleep=\(self.isDisplayAsleep) restarting wake stack helpers")
+                    if self.isActive {
+                        if self.isDisplayAsleep {
+                            self.startMouseJiggle()
+                        }
+                        self.startKeepalive()
+                        if let process = self.caffeinateProcess, !process.isRunning {
+                            self.diagnostics.warning("caffeinate was not running after wake; restarting it")
+                            self.startCaffeinate()
+                        }
+                        self.emitHeartbeat(reason: "post-wake")
+                    }
+                }
             }
-        }
+        )
 
-        wsnc.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self else { return }
-            logger.notice("🖥️ DISPLAY WAKE (lid opened or display on) — stopping mouse jiggle + releasing display assertion")
-            self.isDisplayAsleep = false
-            self.stopMouseJiggle()
-            self.releaseDisplayAssertion()
-        }
+        notificationObservers.append(
+            notificationCenter.addObserver(
+                forName: NSWorkspace.screensDidSleepNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.diagnostics.notice("DISPLAY SLEEP notification received")
+                    self.isDisplayAsleep = true
+                    self.sessionState.lastKnownLidState = true
+                    self.persistSessionState()
+                    if self.isActive {
+                        self.lockScreen()
+                        self.startMouseJiggle()
+                        self.holdDisplayAssertion()
+                    }
+                }
+            }
+        )
 
-        logger.notice("📡 Registered for sleep/wake/display notifications")
+        notificationObservers.append(
+            notificationCenter.addObserver(
+                forName: NSWorkspace.screensDidWakeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.diagnostics.notice("DISPLAY WAKE notification received")
+                    self.isDisplayAsleep = false
+                    self.sessionState.lastKnownLidState = false
+                    self.persistSessionState()
+                    self.stopMouseJiggle()
+                    self.releaseDisplayAssertion()
+                }
+            }
+        )
+
+        diagnostics.notice("Registered sleep, wake, and display notifications")
     }
 
-    // MARK: - Lid state polling (backup for screensDidSleep)
-
     private func isLidClosed() -> Bool {
-        // Read AppleClamshellState from IOKit — the authoritative lid state
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
         if service != IO_OBJECT_NULL {
-            if let prop = IORegistryEntryCreateCFProperty(service, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0) {
-                let closed = prop.takeRetainedValue() as? Bool ?? false
-                IOObjectRelease(service)
-                return closed
+            defer { IOObjectRelease(service) }
+            if let property = IORegistryEntryCreateCFProperty(service, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0) {
+                return property.takeRetainedValue() as? Bool ?? false
             }
-            IOObjectRelease(service)
         }
-        return false  // default to open if we can't read
+
+        return false
     }
 
     private func startLidCheck() {
         stopLidCheck()
         let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
-            guard let self, self.isActive else { return }
-            let lidClosed = self.isLidClosed()
+            Task { @MainActor [weak self] in
+                guard let self, self.isActive else { return }
+                let lidClosed = self.isLidClosed()
+                self.sessionState.lastKnownLidState = lidClosed
+                self.persistSessionState()
+                self.diagnostics.trace("lid-check closed=\(lidClosed) displayAsleep=\(self.isDisplayAsleep)")
 
-            if lidClosed && !self.isDisplayAsleep {
-                logger.notice("🖥️ LID CHECK: lid closed detected — activating clamshell mode")
-                self.isDisplayAsleep = true
-                self.lockScreen()
-                self.startMouseJiggle()
-                self.holdDisplayAssertion()
-            } else if !lidClosed && self.isDisplayAsleep {
-                logger.notice("🖥️ LID CHECK: lid opened detected — deactivating clamshell mode")
-                self.isDisplayAsleep = false
-                self.stopMouseJiggle()
-                self.releaseDisplayAssertion()
+                if lidClosed && !self.isDisplayAsleep {
+                    self.diagnostics.notice("Lid check detected lid close; activating clamshell mode")
+                    self.isDisplayAsleep = true
+                    self.lockScreen()
+                    self.startMouseJiggle()
+                    self.holdDisplayAssertion()
+                } else if !lidClosed && self.isDisplayAsleep {
+                    self.diagnostics.notice("Lid check detected lid open; deactivating clamshell mode")
+                    self.isDisplayAsleep = false
+                    self.stopMouseJiggle()
+                    self.releaseDisplayAssertion()
+                }
             }
         }
+
         RunLoop.main.add(timer, forMode: .common)
         lidCheckTimer = timer
     }
@@ -304,130 +504,167 @@ final class AppState {
         lidCheckTimer = nil
     }
 
-    // MARK: - Screen lock (locks on lid close so nobody can snoop)
-
     private func lockScreen() {
-        logger.notice("🔒 Locking screen via ScreenSaverEngine + display sleep")
-        // 1. Launch screen saver to trigger the lock
+        diagnostics.notice("Locking screen with ScreenSaverEngine followed by displaysleepnow")
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         task.arguments = ["-a", "ScreenSaverEngine"]
         do {
             try task.run()
-            logger.notice("🔒 ScreenSaverEngine launched")
+            diagnostics.notice("ScreenSaverEngine launched for lock workflow")
         } catch {
-            logger.error("❌ Failed to launch ScreenSaverEngine: \(error.localizedDescription)")
+            diagnostics.error("Failed to launch ScreenSaverEngine: \(error.localizedDescription)")
         }
 
-        // 2. After a brief delay (let screensaver register the lock),
-        //    force the display off so no backlight/pixels are burning
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             let sleepTask = Process()
             sleepTask.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
             sleepTask.arguments = ["displaysleepnow"]
             do {
                 try sleepTask.run()
-                logger.notice("🖥️ Display forced off via pmset displaysleepnow")
+                self.diagnostics.notice("pmset displaysleepnow executed successfully")
             } catch {
-                logger.warning("⚠️ pmset displaysleepnow failed: \(error.localizedDescription)")
+                self.diagnostics.warning("pmset displaysleepnow failed: \(error.localizedDescription)")
             }
         }
     }
 
-    // MARK: - Display assertion (only held when lid is closed)
-
     private func holdDisplayAssertion() {
         guard assertionIDDisplaySleep == IOPMAssertionID(0) else { return }
+
         var displayID = IOPMAssertionID(0)
-        let r = IOPMAssertionCreateWithName(
+        let result = IOPMAssertionCreateWithName(
             kIOPMAssertPreventUserIdleDisplaySleep as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
-            "AmphetamineXL preventing sleep" as CFString,
+            "AmphetamineXL preventing display sleep" as CFString,
             &displayID
         )
         assertionIDDisplaySleep = displayID
-        logger.notice("🖥️ Display assertion HELD: \(r == kIOReturnSuccess ? "✅" : "❌ error \(r)")")
+        diagnostics.notice("PreventUserIdleDisplaySleep result=\(result)")
     }
 
     private func releaseDisplayAssertion() {
         guard assertionIDDisplaySleep != IOPMAssertionID(0) else { return }
+
         IOPMAssertionRelease(assertionIDDisplaySleep)
         assertionIDDisplaySleep = IOPMAssertionID(0)
-        logger.notice("🖥️ Display assertion RELEASED — screen can dim/lock")
+        diagnostics.notice("Released display sleep assertion")
     }
 
-    // MARK: - caffeinate subprocess
+    private func releaseSystemAssertions() {
+        if assertionIDIdleSystem != IOPMAssertionID(0) {
+            IOPMAssertionRelease(assertionIDIdleSystem)
+            assertionIDIdleSystem = IOPMAssertionID(0)
+            diagnostics.notice("Released PreventUserIdleSystemSleep assertion")
+        }
+
+        if assertionIDSystemSleep != IOPMAssertionID(0) {
+            IOPMAssertionRelease(assertionIDSystemSleep)
+            assertionIDSystemSleep = IOPMAssertionID(0)
+            diagnostics.notice("Released PreventSystemSleep assertion")
+        }
+
+        releaseDisplayAssertion()
+    }
 
     private func startCaffeinate() {
         stopCaffeinate()
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
-        p.arguments = ["-s"]
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
+        process.arguments = ["-s", "-w", "\(ProcessInfo.processInfo.processIdentifier)"]
+        process.terminationHandler = { [weak self] terminatedProcess in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let status = terminatedProcess.terminationStatus
+                let pid = terminatedProcess.processIdentifier
+                self.diagnostics.notice("caffeinate termination observed pid=\(pid) status=\(status) isShuttingDown=\(self.isShuttingDownWakeStack)")
+                if self.caffeinateProcess?.processIdentifier == pid {
+                    self.caffeinateProcess = nil
+                }
+                self.sessionState.caffeinatePID = nil
+                self.persistSessionState()
+                if self.isActive && !self.isShuttingDownWakeStack {
+                    self.diagnostics.anomaly("caffeinate exited unexpectedly while active; restarting it immediately")
+                    self.startCaffeinate()
+                }
+            }
+        }
+
         do {
-            try p.run()
-            caffeinateProcess = p
-            logger.notice("☕ caffeinate -s started (PID \(p.processIdentifier))")
+            try process.run()
+            caffeinateProcess = process
+            sessionState.caffeinatePID = process.processIdentifier
+            persistSessionState()
+            diagnostics.notice("Started caffeinate with pid=\(process.processIdentifier) command=/usr/bin/caffeinate -s -w \(ProcessInfo.processInfo.processIdentifier)")
         } catch {
-            logger.error("❌ Failed to start caffeinate: \(error.localizedDescription)")
+            diagnostics.error("Failed to start caffeinate: \(error.localizedDescription)")
         }
     }
 
     private func stopCaffeinate() {
-        if let p = caffeinateProcess {
-            logger.notice("☕ Stopping caffeinate (PID \(p.processIdentifier))")
-            p.terminate()
+        if let process = caffeinateProcess {
+            diagnostics.notice("Stopping caffeinate pid=\(process.processIdentifier)")
+            terminatePID(process.processIdentifier, label: "caffeinate")
+        } else if let recordedPID = sessionState.caffeinatePID, processExists(pid: recordedPID) {
+            diagnostics.notice("Stopping recorded caffeinate pid=\(recordedPID) without a live Process handle")
+            terminatePID(recordedPID, label: "recorded caffeinate")
         }
-        caffeinateProcess = nil
-    }
 
-    // MARK: - Network keepalive
+        caffeinateProcess = nil
+        sessionState.caffeinatePID = nil
+        persistSessionState()
+    }
 
     private func startKeepalive() {
         stopKeepalive()
-        logger.notice("🌐 Starting network keepalive (3s interval, \(self.keepaliveHosts.count) hosts)")
+        diagnostics.notice("Starting keepalive timer interval=3 hostCount=\(keepaliveHosts.count)")
+
         let timer = Timer(timeInterval: 3, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            let counter = self.keepaliveCounter
-            self.keepaliveCounter += 1
-            self.keepaliveCount += 1
-
-            Task.detached(priority: .utility) {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let counter = self.keepaliveCounter
+                self.keepaliveCounter += 1
+                self.keepaliveCount += 1
                 let host = self.keepaliveHosts[counter % self.keepaliveHosts.count]
+                self.diagnostics.trace("keepalive tick counter=\(counter) host=\(host)")
 
-                // 1. DNS lookup
-                var hints = addrinfo()
-                hints.ai_family = AF_INET
-                hints.ai_socktype = Int32(SOCK_DGRAM)
-                var res: UnsafeMutablePointer<addrinfo>?
-                getaddrinfo(host, nil, &hints, &res)
-                if res != nil { freeaddrinfo(res) }
-
-                // 2. TCP SYN to port 53
-                let sock = socket(AF_INET, SOCK_STREAM, 0)
-                if sock >= 0 {
-                    var addr = sockaddr_in()
-                    addr.sin_family = sa_family_t(AF_INET)
-                    addr.sin_port = UInt16(53).bigEndian
-                    inet_pton(AF_INET, host, &addr.sin_addr)
-
-                    var flags = fcntl(sock, F_GETFL, 0)
-                    flags |= O_NONBLOCK
-                    fcntl(sock, F_SETFL, flags)
-
-                    withUnsafePointer(to: &addr) { ptr in
-                        ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                            connect(sock, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
-                        }
+                Task.detached(priority: .utility) {
+                    var hints = addrinfo()
+                    hints.ai_family = AF_INET
+                    hints.ai_socktype = Int32(SOCK_DGRAM)
+                    var resultPointer: UnsafeMutablePointer<addrinfo>?
+                    getaddrinfo(host, nil, &hints, &resultPointer)
+                    if let resultPointer {
+                        freeaddrinfo(resultPointer)
                     }
-                    close(sock)
+
+                    let socketFD = socket(AF_INET, SOCK_STREAM, 0)
+                    if socketFD >= 0 {
+                        var address = sockaddr_in()
+                        address.sin_family = sa_family_t(AF_INET)
+                        address.sin_port = UInt16(53).bigEndian
+                        inet_pton(AF_INET, host, &address.sin_addr)
+
+                        var flags = fcntl(socketFD, F_GETFL, 0)
+                        flags |= O_NONBLOCK
+                        _ = fcntl(socketFD, F_SETFL, flags)
+
+                        _ = withUnsafePointer(to: &address) { pointer in
+                            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                                connect(socketFD, socketAddress, socklen_t(MemoryLayout<sockaddr_in>.size))
+                            }
+                        }
+                        close(socketFD)
+                    }
                 }
 
-                // Log every 100 keepalives (~5 min)
                 if counter % 100 == 0 {
-                    logger.info("🌐 Keepalive #\(counter) → \(host)")
+                    self.diagnostics.info("Keepalive tick counter=\(counter) host=\(host)")
                 }
             }
         }
+
         RunLoop.main.add(timer, forMode: .common)
         keepaliveTimer = timer
     }
@@ -437,50 +674,58 @@ final class AppState {
         keepaliveTimer = nil
     }
 
-    // MARK: - Mouse jiggle (prevents clamshell sleep on Apple Silicon)
-
     private func postMouseJiggle(label: String = "tick") {
-        let currentPos = CGEvent(source: nil)?.location ?? CGPoint(x: 100, y: 100)
-        let moved = CGPoint(x: currentPos.x + 1, y: currentPos.y)
+        let currentPosition = CGEvent(source: nil)?.location ?? CGPoint(x: 100, y: 100)
+        let movedPosition = CGPoint(x: currentPosition.x + 1, y: currentPosition.y)
 
-        if let moveEvent = CGEvent(
+        diagnostics.trace("mouse jiggle label=\(label) current=\(currentPosition.x),\(currentPosition.y)")
+
+        guard let moveEvent = CGEvent(
             mouseEventSource: nil,
             mouseType: .mouseMoved,
-            mouseCursorPosition: moved,
+            mouseCursorPosition: movedPosition,
             mouseButton: .left
-        ) {
-            moveEvent.post(tap: .cghidEventTap)
-        } else {
-            logger.error("❌ CGEvent creation FAILED for mouse move (\(label))")
+        ) else {
+            diagnostics.error("Failed to create forward mouse move event for label=\(label)")
             return
         }
 
+        moveEvent.post(tap: .cghidEventTap)
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            if let backEvent = CGEvent(
+            guard let backEvent = CGEvent(
                 mouseEventSource: nil,
                 mouseType: .mouseMoved,
-                mouseCursorPosition: currentPos,
+                mouseCursorPosition: currentPosition,
                 mouseButton: .left
-            ) {
-                backEvent.post(tap: .cghidEventTap)
+            ) else {
+                self.diagnostics.error("Failed to create return mouse move event for label=\(label)")
+                return
             }
+
+            backEvent.post(tap: .cghidEventTap)
         }
     }
 
     private func startMouseJiggle() {
         stopMouseJiggle()
-        logger.notice("🖱️ Starting mouse jiggle (1s interval)")
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.mouseJiggleCount += 1
-            self.lastJiggleTime = Date()
-            self.postMouseJiggle()
+        diagnostics.notice("Starting mouse jiggle timer interval=1")
 
-            // Log every 60 jiggle (1 min)
-            if self.mouseJiggleCount % 60 == 0 {
-                logger.info("🖱️ Jiggle #\(self.mouseJiggleCount) (running \(self.mouseJiggleCount)s)")
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.mouseJiggleCount += 1
+                self.lastJiggleTime = Date()
+                self.postMouseJiggle()
+
+                if self.mouseJiggleCount % 60 == 0 {
+                    self.diagnostics.info("Mouse jiggle count=\(self.mouseJiggleCount)")
+                } else {
+                    self.diagnostics.trace("mouse jiggle tick count=\(self.mouseJiggleCount)")
+                }
             }
         }
+
         RunLoop.main.add(timer, forMode: .common)
         mouseJiggleTimer = timer
     }
@@ -489,8 +734,6 @@ final class AppState {
         mouseJiggleTimer?.invalidate()
         mouseJiggleTimer = nil
     }
-
-    // MARK: - Duration timer
 
     private func startDurationTimer() {
         stopDurationTimer()
@@ -508,13 +751,51 @@ final class AppState {
         durationTimer = nil
     }
 
+    private func startHeartbeatTimer() {
+        stopHeartbeatTimer()
+        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.emitHeartbeat(reason: "timer")
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        heartbeatTimer = timer
+    }
+
+    private func stopHeartbeatTimer() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = nil
+    }
+
+    private func emitHeartbeat(reason: String) {
+        let caffeinatePIDDescription = sessionState.caffeinatePID.map(String.init) ?? "nil"
+        let caffeinateRunning = sessionState.caffeinatePID.map(processExists(pid:)) ?? false
+        let ownedValues = powerProfileManager.currentOwnedValues(for: sessionState)
+        let body = [
+            "reason=\(reason)",
+            "profile=\(sessionState.profile.rawValue)",
+            "active=\(isActive)",
+            "displayAsleep=\(isDisplayAsleep)",
+            "lidClosed=\(isLidClosed())",
+            "caffeinatePID=\(caffeinatePIDDescription)",
+            "caffeinateRunning=\(caffeinateRunning)",
+            "mouseJiggleCount=\(mouseJiggleCount)",
+            "keepaliveCount=\(keepaliveCount)",
+            "lastJiggle=\(lastJiggleTime.map(isoTimestamp) ?? "never")",
+            "ownedPmsetKeys=\(sessionState.ownedPmsetKeys.joined(separator: ", "))",
+            "ownedPmsetValues=",
+            ownedValues.isEmpty ? "<none>" : ownedValues.keys.sorted().map { "\($0)=\(ownedValues[$0] ?? "")" }.joined(separator: "\n"),
+        ].joined(separator: "\n")
+        diagnostics.logMultiline(.notice, title: "heartbeat", body: body)
+    }
+
     private func updateDurationText() {
-        guard let since = activeSince else {
+        guard let activeSince else {
             durationText = "Inactive"
             return
         }
 
-        let elapsed = Int(Date().timeIntervalSince(since))
+        let elapsed = Int(Date().timeIntervalSince(activeSince))
         let hours = elapsed / 3600
         let minutes = (elapsed % 3600) / 60
 
@@ -526,4 +807,37 @@ final class AppState {
             durationText = "Active for <1m"
         }
     }
+
+    private func processExists(pid: Int32) -> Bool {
+        if pid <= 0 {
+            return false
+        }
+
+        if kill(pid, 0) == 0 {
+            return true
+        }
+
+        return errno != ESRCH
+    }
+
+    private func terminatePID(_ pid: Int32, label: String) {
+        guard pid > 0 else {
+            return
+        }
+
+        diagnostics.notice("Sending SIGTERM to \(label) pid=\(pid)")
+        if kill(pid, SIGTERM) != 0 && errno != ESRCH {
+            diagnostics.error("Failed to SIGTERM \(label) pid=\(pid) errno=\(errno)")
+        }
+
+        usleep(200_000)
+
+        if processExists(pid: pid) {
+            diagnostics.warning("\(label) pid=\(pid) survived SIGTERM; escalating to SIGKILL")
+            if kill(pid, SIGKILL) != 0 && errno != ESRCH {
+                diagnostics.error("Failed to SIGKILL \(label) pid=\(pid) errno=\(errno)")
+            }
+        }
+    }
+
 }

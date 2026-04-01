@@ -1,7 +1,7 @@
 # AmphetamineXL — Handoff Document
 
 **Date:** 2026-03-20
-**Status:** ✅ WORKING — v2.1 confirmed. Mac stays awake with lid closed, no external display, on iPhone hotspot. Auto-locks and kills display on lid close.
+**Status:** ✅ WORKING — v2.3 in progress. Wake stack cleanup, recovery, and rollback diagnostics added around the proven lid-close behavior.
 
 ---
 
@@ -11,7 +11,7 @@ AmphetamineXL — a macOS menu bar app that prevents Mac sleep when lid is close
 - Repo: `/Users/hannojacobs/Documents/Code/AmphetamineXL`
 - GitHub: https://github.com/HannoJacobs/AmphetamineXL
 - Installed: `/Applications/AmphetamineXL.app`
-- Current version: v2.1
+- Current version: v2.3
 
 ## The Problem (solved)
 
@@ -72,7 +72,7 @@ On Apple Silicon with no external display, lid-close is a hardware event handled
 
 This is fundamentally different from Intel Macs where `caffeinate -s` was sufficient.
 
-## Lid-Aware Behavior (v2.1)
+## Lid-Aware Behavior (v2.3)
 
 **Lid open:** Screen dims/locks normally. Only system sleep assertions + caffeinate + keepalive active.
 

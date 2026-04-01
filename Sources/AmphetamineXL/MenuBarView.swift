@@ -12,6 +12,8 @@ struct MenuBarView: View {
             Divider()
             launchAtLoginRow
             Divider()
+            diagnosticsRow
+            Divider()
             quitRow
         }
         .frame(width: 280)
@@ -77,7 +79,25 @@ struct MenuBarView: View {
         .padding(.vertical, 10)
         .contentShape(Rectangle())
         .onTapGesture {
+            appState.prepareForQuit()
             NSApplication.shared.terminate(nil)
+        }
+    }
+
+    private var diagnosticsRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .frame(width: 18)
+                .foregroundColor(.primary)
+            Text("Open Diagnostics Logs")
+                .foregroundColor(.primary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            appState.openDiagnosticsLogs()
         }
     }
 }
