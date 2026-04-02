@@ -25,6 +25,12 @@ The fixed build also writes a baseline snapshot to:
 ~/Library/Application Support/AmphetamineXL/baseline-snapshot.json
 ```
 
+## Current Validation Position
+
+- Initial user inspection on 2026-04-02 indicates the current state appears to work well
+- This should still be treated as provisional until several weeks of real closed-lid use have passed
+- If that longer validation fails, rollback preference is the pre-change "nuclear option" baseline from before the recent cleanup, recovery, and runtime-profile changes
+
 ## Tier 1: Artifact Rollback
 
 Reinstall the frozen v2.2 app bundle or DMG if the fixed build proves insufficient.
@@ -97,6 +103,15 @@ Rollback immediately if any of these happen:
 - `caffeinate` survives app quit or crash
 - The app introduces unowned `pmset` drift
 - The new diagnostics logs are missing or incomplete during a failure
+- Multi-week real-world testing shows the current build is less reliable than the pre-change baseline
+
+## Preferred Fallback Order
+
+If the current build disappoints during the extended validation window, prefer rollback in this order:
+
+1. Pre-change "nuclear option" baseline from `~/Library/Application Support/AmphetamineXL/Rollback/v2.2-baseline/`
+2. Manual machine-state rollback to the known emergency state in Tier 3
+3. Only after rollback, investigate a new forward fix from logs and captured evidence
 
 ## Evidence Checklist
 

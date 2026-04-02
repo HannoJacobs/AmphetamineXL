@@ -1,7 +1,7 @@
 # AmphetamineXL — Handoff Document
 
 **Date:** 2026-04-02
-**Status:** ✅ WORKING — post-v2.3.2 `main`. Active mode now always uses the aggressive max-awake profile, while disable and quit restore normal sleep-capable settings.
+**Status:** ✅ WORKING — post-v2.3.2 `main`. Active mode now always uses the aggressive max-awake profile, while disable and quit restore normal sleep-capable settings. Initial real-world inspection on 2026-04-02 looks good, but longer validation is still in progress.
 
 ---
 
@@ -90,3 +90,9 @@ Detection: `AppleClamshellState` polled every 2s via IOKit `IOPMrootDomain`.
 - Caffeine ON: always `legacy-max-awake`
 - Caffeine OFF: app remains in the menu bar, but restores normal sleep-capable settings
 - App quit or crash recovery: restore previously owned `pmset` values before continuing
+
+## Validation Status
+
+- Initial user inspection on 2026-04-02: current behavior appears to be working well
+- Extended validation window: user will keep testing over the coming weeks
+- If the current build proves unreliable in real-world use, preferred rollback target is the pre-change "nuclear option" baseline from before the recent cleanup/runtime changes, not further incremental weakening of the active wake strategy

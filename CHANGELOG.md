@@ -8,6 +8,7 @@
 - **Normal sleep restored when inactive:** Disabling caffeine or quitting the app restores the exact pre-activation `pmset` snapshot, including `sleep`, `displaysleep`, `standby`, `hibernatemode`, and `disablesleep`.
 - **Better power diagnostics:** Logs now explicitly record the active runtime contract and `SleepDisabled` before apply, after apply, and after restore.
 - **Safer helper teardown:** The `caffeinate` termination callback no longer mutates tracked session state directly, avoiding the exclusivity crash seen when disabling caffeine from the menu bar.
+- **Validation note:** Initial user inspection on 2026-04-02 indicates this state appears to work well, but the intended decision window is several weeks of real use. If reliability regresses, the preferred fallback is the pre-change "nuclear option" baseline.
 
 ## v2.3.2 — 2026-04-02 (current)
 > Fix the default-on launch source and keep the inactive menu bar item visible.
