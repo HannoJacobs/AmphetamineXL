@@ -1,9 +1,9 @@
 # Rollback
 
-AmphetamineXL v2.3.2 keeps two rollback paths ready at all times:
+AmphetamineXL keeps two rollback paths ready at all times:
 
 1. The frozen pre-fix artifact and machine-state evidence bundle in `~/Library/Application Support/AmphetamineXL/Rollback/`
-2. A hidden built-in `legacy-max-awake` profile that keeps the stronger machine-wide sleep suppression while preserving the new cleanup and diagnostics
+2. The active runtime contract: caffeine ON always uses `legacy-max-awake`, while caffeine OFF or app quit restores the captured normal sleep-capable machine state
 
 ## Baseline Freeze
 
@@ -41,27 +41,11 @@ pgrep -fal 'AmphetamineXL|caffeinate|ScreenSaverEngine'
 pmset -g assertions
 ```
 
-## Tier 2: Hidden Legacy Max-Awake Profile
+## Tier 2: Active Runtime Rollback Contract
 
-If v2.3.2’s default profile is too conservative, switch to the hidden compatibility profile without giving up the new cleanup and logging.
+Active mode now always uses `legacy-max-awake` while preserving the new cleanup and diagnostics.
 
-Enable:
-
-```bash
-defaults write com.hannojacobs.AmphetamineXL wakeProfile legacy-max-awake
-pkill -x AmphetamineXL 2>/dev/null || true
-open /Applications/AmphetamineXL.app
-```
-
-Return to the default fixed profile:
-
-```bash
-defaults delete com.hannojacobs.AmphetamineXL wakeProfile
-pkill -x AmphetamineXL 2>/dev/null || true
-open /Applications/AmphetamineXL.app
-```
-
-`legacy-max-awake` is allowed to apply:
+The active runtime is allowed to apply:
 
 - `standby 0`
 - `hibernatemode 0`
@@ -70,7 +54,13 @@ open /Applications/AmphetamineXL.app
 - `displaysleep 0`
 - `disablesleep 1`
 
-The fixed build snapshots the values it replaces and restores them on disable, quit, termination, or recovery.
+On disable, quit, termination, or recovery, the app restores the exact captured values it replaced, including:
+
+- `standby`
+- `hibernatemode`
+- `sleep`
+- `displaysleep`
+- `disablesleep`
 
 ## Tier 3: Machine-State Rollback
 
@@ -91,6 +81,12 @@ sudo pmset disablesleep 0
 ```
 
 Adjust the timer values above if your saved baseline used different `sleep` or `displaysleep` values.
+
+## Runtime Expectations
+
+- Caffeine ON: aggressive max-awake machine state
+- Caffeine OFF: normal sleep-capable machine state restored
+- App quit: normal sleep-capable machine state restored
 
 ## Automatic Rollback Triggers
 

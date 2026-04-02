@@ -10,26 +10,22 @@ enum WakeProfile: String, Codable {
     case legacyMaxAwake = "legacy-max-awake"
 
     static let defaultsKey = "wakeProfile"
+    static let activeRuntimeDefault: WakeProfile = .legacyMaxAwake
 
     static func resolved(
-        userDefaults: UserDefaults = .standard,
         arguments: [String] = ProcessInfo.processInfo.arguments
     ) -> WakeProfile {
         for (index, argument) in arguments.enumerated() {
             if argument == "--wake-profile", index + 1 < arguments.count {
-                return WakeProfile(rawValue: arguments[index + 1]) ?? .fixedDefault
+                return WakeProfile(rawValue: arguments[index + 1]) ?? activeRuntimeDefault
             }
 
             if let value = argument.split(separator: "=", maxSplits: 1).last, argument.hasPrefix("--wake-profile=") {
-                return WakeProfile(rawValue: String(value)) ?? .fixedDefault
+                return WakeProfile(rawValue: String(value)) ?? activeRuntimeDefault
             }
         }
 
-        if let persisted = userDefaults.string(forKey: defaultsKey), let profile = WakeProfile(rawValue: persisted) {
-            return profile
-        }
-
-        return .fixedDefault
+        return activeRuntimeDefault
     }
 }
 

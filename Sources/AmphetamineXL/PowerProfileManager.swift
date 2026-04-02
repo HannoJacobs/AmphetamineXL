@@ -30,6 +30,7 @@ final class PowerProfileManager {
         sessionState.ownedPmsetKeys = ownedKeys
 
         diagnostics.notice("Applying wake profile \(profile.rawValue) with owned keys: \(ownedKeys.joined(separator: ", "))")
+        logLiveSleepDisabledState(label: "before apply \(profile.rawValue)")
         diagnostics.logMultiline(.notice, title: "pmset snapshot before apply", body: describe(values: sessionState.ownedPmsetPreviousValues))
 
         let customValues = desiredCustomValues(for: profile).filter { ownedKeys.contains($0.key) }
@@ -51,6 +52,7 @@ final class PowerProfileManager {
         }
 
         diagnostics.logMultiline(.notice, title: "pmset snapshot after apply", body: describe(values: currentOwnedValues(for: sessionState)))
+        logLiveSleepDisabledState(label: "after apply \(profile.rawValue)")
     }
 
     func restore(sessionState: inout AppSessionState, reason: ShutdownReason) {
@@ -86,6 +88,13 @@ final class PowerProfileManager {
                 arguments: ["disablesleep", disableSleep]
             )
         }
+
+        diagnostics.logMultiline(
+            .notice,
+            title: "pmset snapshot after restore",
+            body: describe(values: captureCurrentValues(for: sessionState.ownedPmsetKeys))
+        )
+        logLiveSleepDisabledState(label: "after restore \(reason.rawValue)")
 
         sessionState.ownedPmsetKeys = []
         sessionState.ownedPmsetPreviousValues = [:]
@@ -229,6 +238,11 @@ final class PowerProfileManager {
             restored[String(key.dropFirst(prefix.count))] = value
         }
         return restored
+    }
+
+    private func logLiveSleepDisabledState(label: String) {
+        let liveValues = readLiveValues()
+        diagnostics.notice("[pmset] \(label) SleepDisabled=\(liveValues["disablesleep"] ?? "unknown")")
     }
 
     private func flattenedArguments(_ values: [String: String]) -> [String] {

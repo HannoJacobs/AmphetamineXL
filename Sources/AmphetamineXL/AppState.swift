@@ -54,6 +54,7 @@ final class AppState {
         let previousState = sessionStore.load()
         let hasSetPref = UserDefaults.standard.object(forKey: "amphetamine_active") != nil
         let savedDesiredState = hasSetPref ? UserDefaults.standard.bool(forKey: "amphetamine_active") : true
+        let persistedWakeProfile = UserDefaults.standard.string(forKey: WakeProfile.defaultsKey)
         let resolvedProfile = WakeProfile.resolved()
         let newSessionID = UUID().uuidString
 
@@ -78,8 +79,10 @@ final class AppState {
         diagnostics.notice("AmphetamineXL initializing version=\(currentAppVersion()) build=\(currentBuildVersion()) pid=\(ProcessInfo.processInfo.processIdentifier)")
         diagnostics.notice(
             "Launch settings: desiredActiveOnLaunch=\(savedDesiredState) " +
-            "hasLegacyUserDefault=\(hasSetPref) wakeProfile=\(resolvedProfile.rawValue)"
+            "hasLegacyUserDefault=\(hasSetPref) wakeProfile=\(resolvedProfile.rawValue) " +
+            "persistedWakeProfileIgnored=\(persistedWakeProfile ?? "nil")"
         )
+        diagnostics.notice("Active mode is max-awake only; normal runtime uses \(WakeProfile.activeRuntimeDefault.rawValue)")
         diagnostics.notice("Launch at login enabled=\(currentLaunchAtLoginState())")
 
         persistSessionState()
@@ -161,13 +164,16 @@ final class AppState {
             return
         }
 
+        let activeProfile = WakeProfile.resolved()
         isShuttingDownWakeStack = false
+        sessionState.profile = activeProfile
         sessionState.desiredActiveOnLaunch = true
         sessionState.shutdownClean = false
         sessionState.lastShutdownReason = nil
         UserDefaults.standard.set(true, forKey: "amphetamine_active")
 
         diagnostics.notice("Enabling wake stack with profile \(sessionState.profile.rawValue)")
+        diagnostics.notice("Active mode is max-awake only; applying \(activeProfile.rawValue) for this session")
         diagnostics.trace("enable start profile=\(sessionState.profile.rawValue) displayAsleep=\(isDisplayAsleep)")
 
         let reason = "AmphetamineXL preventing sleep" as CFString
@@ -574,24 +580,15 @@ final class AppState {
         stopCaffeinate()
 
         let process = Process()
+        let diagnostics = self.diagnostics
         process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
         process.arguments = ["-s", "-w", "\(ProcessInfo.processInfo.processIdentifier)"]
-        process.terminationHandler = { [weak self] terminatedProcess in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                let status = terminatedProcess.terminationStatus
-                let pid = terminatedProcess.processIdentifier
-                self.diagnostics.notice("caffeinate termination observed pid=\(pid) status=\(status) isShuttingDown=\(self.isShuttingDownWakeStack)")
-                if self.caffeinateProcess?.processIdentifier == pid {
-                    self.caffeinateProcess = nil
-                }
-                self.sessionState.caffeinatePID = nil
-                self.persistSessionState()
-                if self.isActive && !self.isShuttingDownWakeStack {
-                    self.diagnostics.anomaly("caffeinate exited unexpectedly while active; restarting it immediately")
-                    self.startCaffeinate()
-                }
-            }
+        process.terminationHandler = { terminatedProcess in
+            diagnostics.notice(
+                "caffeinate termination observed pid=\(terminatedProcess.processIdentifier) " +
+                "status=\(terminatedProcess.terminationStatus) " +
+                "stateReconciliation=deferred"
+            )
         }
 
         do {
@@ -773,6 +770,17 @@ final class AppState {
     private func emitHeartbeat(reason: String) {
         let caffeinatePIDDescription = sessionState.caffeinatePID.map(String.init) ?? "nil"
         let caffeinateRunning = sessionState.caffeinatePID.map(processExists(pid:)) ?? false
+
+        if isActive && !isShuttingDownWakeStack && !caffeinateRunning {
+            diagnostics.anomaly(
+                "Heartbeat detected missing caffeinate process while active; " +
+                "recordedPID=\(caffeinatePIDDescription) reason=\(reason). Restarting it now."
+            )
+            startCaffeinate()
+        }
+
+        let resolvedCaffeinatePIDDescription = sessionState.caffeinatePID.map(String.init) ?? "nil"
+        let resolvedCaffeinateRunning = sessionState.caffeinatePID.map(processExists(pid:)) ?? false
         let ownedValues = powerProfileManager.currentOwnedValues(for: sessionState)
         let body = [
             "reason=\(reason)",
@@ -780,8 +788,8 @@ final class AppState {
             "active=\(isActive)",
             "displayAsleep=\(isDisplayAsleep)",
             "lidClosed=\(isLidClosed())",
-            "caffeinatePID=\(caffeinatePIDDescription)",
-            "caffeinateRunning=\(caffeinateRunning)",
+            "caffeinatePID=\(resolvedCaffeinatePIDDescription)",
+            "caffeinateRunning=\(resolvedCaffeinateRunning)",
             "mouseJiggleCount=\(mouseJiggleCount)",
             "keepaliveCount=\(keepaliveCount)",
             "lastJiggle=\(lastJiggleTime.map(isoTimestamp) ?? "never")",
