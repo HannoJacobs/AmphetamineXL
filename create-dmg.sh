@@ -50,9 +50,9 @@ cat > "$BUILD_DIR/$APP_BUNDLE/Contents/Info.plist" << 'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
-    <string>2.3</string>
+    <string>2.3.1</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.3</string>
+    <string>2.3.1</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>

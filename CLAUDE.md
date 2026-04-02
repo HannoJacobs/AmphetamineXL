@@ -6,7 +6,7 @@ Full briefing: see `AGENTS.md`. This file is the concise session-start reference
 
 ---
 
-## How It Works (v2.3)
+## How It Works (v2.3.1)
 
 **The core fix is CGEvent mouse jiggle.** Every 1 second (only when lid is closed), posts `CGEventCreateMouseEvent(.mouseMoved)` to move cursor 1px right then back. WindowServer registers this as `UserIsActive` HID activity. The SMC respects HID activity and won't enter clamshell sleep.
 

@@ -46,7 +46,8 @@ final class AppState {
     private let powerProfileManager: PowerProfileManager
 
     var menuBarIcon: String {
-        isActive ? "bolt.fill" : "bolt.slash"
+        // Keep the menu bar item visible even when caffeine is off.
+        isActive ? "bolt.fill" : "bolt"
     }
 
     init() {

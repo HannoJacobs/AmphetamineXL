@@ -1,6 +1,13 @@
 # Changelog
 
-## v2.3 — 2026-04-01 (current)
+## v2.3.1 — 2026-04-02 (current)
+> Fix the inactive menu bar icon so the app stays visibly present when caffeine is off.
+
+### What changed
+- **Visible inactive menu bar state:** The menu bar extra now uses a plain `bolt` icon when caffeine is disabled instead of `bolt.slash`, which made the app look like it had quit even though the process was still running.
+- **Behavior unchanged:** Disabling caffeine still tears down the wake stack and restores app-owned `pmset` values, but the app remains resident in the menu bar in a clearly visible inactive state.
+
+## v2.3 — 2026-04-01
 > Leak-proof wake stack, hidden legacy rollback profile, and persistent diagnostics.
 
 ### What changed
