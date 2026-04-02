@@ -1,6 +1,6 @@
 # Rollback
 
-AmphetamineXL v2.3.1 keeps two rollback paths ready at all times:
+AmphetamineXL v2.3.2 keeps two rollback paths ready at all times:
 
 1. The frozen pre-fix artifact and machine-state evidence bundle in `~/Library/Application Support/AmphetamineXL/Rollback/`
 2. A hidden built-in `legacy-max-awake` profile that keeps the stronger machine-wide sleep suppression while preserving the new cleanup and diagnostics
@@ -43,7 +43,7 @@ pmset -g assertions
 
 ## Tier 2: Hidden Legacy Max-Awake Profile
 
-If v2.3.1’s default profile is too conservative, switch to the hidden compatibility profile without giving up the new cleanup and logging.
+If v2.3.2’s default profile is too conservative, switch to the hidden compatibility profile without giving up the new cleanup and logging.
 
 Enable:
 

@@ -1,7 +1,7 @@
 # AmphetamineXL — Handoff Document
 
 **Date:** 2026-03-20
-**Status:** ✅ WORKING — v2.3.1 in progress. Wake stack cleanup, recovery, rollback diagnostics, and the visible inactive menu bar state are in place around the proven lid-close behavior.
+**Status:** ✅ WORKING — v2.3.2 in progress. Wake stack cleanup, recovery, rollback diagnostics, visible inactive menu bar state, and clean default-on launch semantics are in place around the proven lid-close behavior.
 
 ---
 
@@ -11,7 +11,7 @@ AmphetamineXL — a macOS menu bar app that prevents Mac sleep when lid is close
 - Repo: `/Users/hannojacobs/Documents/Code/AmphetamineXL`
 - GitHub: https://github.com/HannoJacobs/AmphetamineXL
 - Installed: `/Applications/AmphetamineXL.app`
-- Current version: v2.3.1
+- Current version: v2.3.2
 
 ## The Problem (solved)
 
@@ -72,7 +72,7 @@ On Apple Silicon with no external display, lid-close is a hardware event handled
 
 This is fundamentally different from Intel Macs where `caffeinate -s` was sufficient.
 
-## Lid-Aware Behavior (v2.3.1)
+## Lid-Aware Behavior (v2.3.2)
 
 **Lid open:** Screen dims/locks normally. Only system sleep assertions + caffeinate + keepalive active.
 

@@ -13,7 +13,7 @@ AmphetamineXL is a macOS menu bar app that prevents Apple Silicon clamshell slee
 - **Bundle ID**: `com.hannojacobs.AmphetamineXL`
 - **GitHub**: `HannoJacobs/AmphetamineXL`
 - **GitHub Pages**: `docs/` folder on `main` → https://hannojacobs.github.io/AmphetamineXL/
-- **Current version**: v2.3.1
+- **Current version**: v2.3.2
 
 ---
 

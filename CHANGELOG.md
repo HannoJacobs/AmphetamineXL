@@ -1,6 +1,14 @@
 # Changelog
 
-## v2.3.1 — 2026-04-02 (current)
+## v2.3.2 — 2026-04-02 (current)
+> Fix the default-on launch source and keep the inactive menu bar item visible.
+
+### What changed
+- **First launch defaults to ON again:** Launch state now comes from the saved user preference only, with a hard default of `true` when no preference exists. Stale session-state files no longer influence the first-launch default.
+- **Stable menu bar label updates:** The menu bar extra now uses an explicit label view instead of the `systemImage:` initializer, which makes active/inactive icon changes more reliable.
+- **Visible inactive icon:** The inactive menu bar state now uses `bolt.circle`, which is much harder to mistake for the app disappearing.
+
+## v2.3.1 — 2026-04-02
 > Fix the inactive menu bar icon so the app stays visibly present when caffeine is off.
 
 ### What changed

@@ -46,15 +46,14 @@ final class AppState {
     private let powerProfileManager: PowerProfileManager
 
     var menuBarIcon: String {
-        // Keep the menu bar item visible even when caffeine is off.
-        isActive ? "bolt.fill" : "bolt"
+        // Keep the menu bar item clearly visible even when caffeine is off.
+        isActive ? "bolt.fill" : "bolt.circle"
     }
 
     init() {
         let previousState = sessionStore.load()
         let hasSetPref = UserDefaults.standard.object(forKey: "amphetamine_active") != nil
-        let savedDesiredState = previousState?.desiredActiveOnLaunch
-            ?? (hasSetPref ? UserDefaults.standard.bool(forKey: "amphetamine_active") : true)
+        let savedDesiredState = hasSetPref ? UserDefaults.standard.bool(forKey: "amphetamine_active") : true
         let resolvedProfile = WakeProfile.resolved()
         let newSessionID = UUID().uuidString
 
@@ -77,7 +76,10 @@ final class AppState {
         powerProfileManager = PowerProfileManager(diagnostics: diagnostics)
 
         diagnostics.notice("AmphetamineXL initializing version=\(currentAppVersion()) build=\(currentBuildVersion()) pid=\(ProcessInfo.processInfo.processIdentifier)")
-        diagnostics.notice("Launch settings: desiredActiveOnLaunch=\(savedDesiredState) hasLegacyUserDefault=\(hasSetPref) wakeProfile=\(resolvedProfile.rawValue)")
+        diagnostics.notice(
+            "Launch settings: desiredActiveOnLaunch=\(savedDesiredState) " +
+            "hasLegacyUserDefault=\(hasSetPref) wakeProfile=\(resolvedProfile.rawValue)"
+        )
         diagnostics.notice("Launch at login enabled=\(currentLaunchAtLoginState())")
 
         persistSessionState()

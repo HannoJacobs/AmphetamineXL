@@ -24,9 +24,11 @@ struct AmphetamineXLApp: App {
 
     var body: some Scene {
         let _ = AppLifecycleBridge.shared.appState = appState
-        MenuBarExtra("AmphetamineXL", systemImage: appState.menuBarIcon) {
+        MenuBarExtra {
             MenuBarView()
                 .environment(appState)
+        } label: {
+            Image(systemName: appState.menuBarIcon)
         }
         .menuBarExtraStyle(.window)
     }
