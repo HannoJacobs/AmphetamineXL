@@ -41,7 +41,7 @@ git clone https://github.com/HannoJacobs/AmphetamineXL && cd AmphetamineXL && xc
 ## Verify
 
 ```bash
-pgrep -x AmphetamineXL && pmset -g assertions | grep -E "AmphetamineXL|UserIsActive" && pmset -g | grep -E "standby|hibernatemode|autopoweroff"
+pgrep -x AmphetamineXL && pmset -g assertions | grep -E "AmphetamineXL|caffeinate|UserIsActive" && pmset -g live | grep -E "SleepDisabled|standby|hibernatemode|sleep|displaysleep"
 ```
 
 ## Debug
@@ -62,28 +62,22 @@ pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20
 
 ## Usage
 
-- **⚡** = caffeinated (Mac stays awake with lid closed)
-- **⚡/** = sleeping (normal behaviour)
+- **Caffeine ON** = aggressive max-awake machine state while the app is active
+- **Caffeine OFF** = app stays resident, but your normal sleep-capable machine settings are restored
 - Click to toggle. Optional: enable "Launch at Login"
 
 **Lid closed:** screen locks → display off → mouse jiggle active → Mac stays awake
-**Lid open:** screen dims/locks normally, no jiggle interference
+**Lid open:** no jiggle interference, but the active max-awake `pmset` profile is still held until you disable caffeine or quit the app
 
 ## Recovery + Rollback
 
 - Baseline rollback artifacts live in `~/Library/Application Support/AmphetamineXL/Rollback/`
 - Session diagnostics live in `~/Library/Application Support/AmphetamineXL/Logs/`
-- Hidden rollback mode:
+- Runtime contract:
 
-```bash
-defaults write com.hannojacobs.AmphetamineXL wakeProfile legacy-max-awake
-```
-
-- Return to the default fixed profile:
-
-```bash
-defaults delete com.hannojacobs.AmphetamineXL wakeProfile
-```
+- Caffeine ON: `legacy-max-awake`
+- Caffeine OFF or app quit: restore the captured normal machine state
+- Full rollback details: [docs/ROLLBACK.md](docs/ROLLBACK.md)
 
 ## License
 

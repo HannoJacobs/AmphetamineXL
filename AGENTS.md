@@ -13,7 +13,8 @@ AmphetamineXL is a macOS menu bar app that prevents Apple Silicon clamshell slee
 - **Bundle ID**: `com.hannojacobs.AmphetamineXL`
 - **GitHub**: `HannoJacobs/AmphetamineXL`
 - **GitHub Pages**: `docs/` folder on `main` → https://hannojacobs.github.io/AmphetamineXL/
-- **Current version**: v2.3.2
+- **Current release**: v2.3.2
+- **Current repo state**: post-v2.3.2 `main`
 
 ---
 
@@ -35,6 +36,7 @@ The app detects lid state via `AppleClamshellState` (IOKit `IOPMrootDomain`, pol
 - 2 IOKit assertions (PreventUserIdleSystemSleep + PreventSystemSleep)
 - caffeinate -s subprocess
 - Network keepalive (5 DNS hosts, 3s interval)
+- Max-awake `pmset` profile (`standby 0`, `hibernatemode 0`, `sleep 0`, `displaysleep 0`, `disablesleep 1`)
 - NO mouse jiggle (screen dims/locks normally)
 - NO display assertion
 
@@ -54,7 +56,7 @@ The app detects lid state via `AppleClamshellState` (IOKit `IOPMrootDomain`, pol
 | caffeinate -s subprocess | Always running | Kernel-level sleep prevention |
 | Network keepalive (5 DNS hosts) | 3s | Hotspot/Wi-Fi connection drops |
 | Auto-lock + display off | On lid close | Security + battery saving |
-| pmset overrides | System-level (one-time) | Deep standby/hibernate |
+| pmset max-awake profile | Active session | Forces `legacy-max-awake` while caffeine is ON and restores the exact snapshot when OFF |
 
 ### Logging
 
@@ -64,7 +66,7 @@ Subsystem: `com.hannojacobs.AmphetamineXL`, category: `SleepPrevention`
 log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 10m
 ```
 
-Logs: init, assertion results, lid state changes, lock events, sleep/wake notifications, jiggle count (every 60s), keepalive count (every 5min).
+Logs: init, assertion results, lid state changes, lock events, sleep/wake notifications, `SleepDisabled` before apply/after apply/after restore, jiggle count (every 60s), keepalive count (every 5min).
 
 ---
 
@@ -197,10 +199,11 @@ pmset -g | grep -E "standby|hibernatemode|autopoweroff"
 - **Lid detection** — `AppleClamshellState` via IOKit `IOPMrootDomain`, polled every 2s
 - **Auto-lock** — ScreenSaverEngine + `pmset displaysleepnow` on lid close
 - **IOKit assertions** — 2 always (idle + system), 1 on lid close (display)
-- **caffeinate -s** subprocess for kernel-level sleep prevention
+- **caffeinate -s -w <app pid>** subprocess for kernel-level sleep prevention with automatic child cleanup
 - **Network keepalive** — rotates 5 DNS hosts with UDP + TCP probes every 3s
 - **os.log** — subsystem `com.hannojacobs.AmphetamineXL`, category `SleepPrevention`
 - **Sleep/wake notifications** — willSleep, didWake, screensDidSleep, screensDidWake
+- **Runtime contract** — caffeine ON always resolves to `legacy-max-awake`; OFF/quit restores captured normal sleep-capable settings
 - State persisted via `UserDefaults` key `"amphetamine_active"`
 
 ### MenuBarView.swift

@@ -58,7 +58,7 @@ AmphetamineXL uses 5 simultaneous layers, but **only the first one actually prev
 | IOKit assertions (x3) | Always held | Prevents idle sleep, system sleep, display sleep |
 | caffeinate -s -w <app pid> | Always running while active | Kernel-level sleep prevention with automatic child cleanup |
 | Network keepalive | 3s | Keeps hotspot/Wi-Fi alive (5 DNS hosts, UDP + TCP) |
-| pmset profiles | Session-owned | Applies `fixed-default` or `legacy-max-awake` values and restores exact previous values |
+| pmset max-awake profile | Session-owned | Applies `legacy-max-awake` while active and restores exact previous values when inactive |
 
 ### IOKit Assertions Held
 
@@ -79,13 +79,13 @@ Each tick does:
 
 Varied targets prevent any single host from rate-limiting and make traffic patterns look natural.
 
-### pmset Ownership and Rollback
+### pmset Ownership and Runtime Contract
 
 AmphetamineXL now snapshots the exact `pmset` values it owns before changing them. On disable, quit, termination, or crash recovery, it restores those exact values instead of assuming defaults.
 
-- `fixed-default` owns `standby`, `hibernatemode`, and `autopoweroff` where supported
-- `legacy-max-awake` adds `sleep`, `displaysleep`, and `disablesleep`
-- The active profile is stored in a hidden `wakeProfile` user default
+- Normal active runtime always uses `legacy-max-awake`
+- `legacy-max-awake` owns `standby`, `hibernatemode`, `sleep`, `displaysleep`, and `disablesleep`
+- `fixed-default` remains only for backwards-compatible decoding of older session files and logs
 - Recovery runs before auto-enable so stale `pmset` state is cleaned up before a new session starts
 
 ## Logging
@@ -105,6 +105,7 @@ Events logged:
 - Full startup snapshots: `pmset -g`, `pmset -g custom`, `pmset -g assertions`, `pmset -g live`, related processes
 - ⚡ Caffeine enable/disable with assertion results
 - Exact `pmset` reads, applies, restores, exit codes, stdout, stderr
+- `SleepDisabled` before apply, after apply, and after restore
 - 🛑 `willSleep` — CRITICAL, means the jiggle failed
 - 🟢 `didWake` — restarts all timers
 - 🖥️ `screensDidSleep` / `screensDidWake` — display/lid events
@@ -159,4 +160,4 @@ Binary: `~/Library/Developer/Xcode/DerivedData/AmphetamineXL-*/Build/Products/Re
 - Screen won't dim
 - Both intentional for "backpack mode" (lid is closed anyway)
 
-**Future fix:** Only jiggle when `screensDidSleep` has fired (display off / lid closed), stop on `screensDidWake`. Would allow auto-lock when lid is open.
+When caffeine is disabled or the app quits, the exact pre-activation machine state is restored so normal sleep can work again.

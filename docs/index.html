@@ -278,7 +278,7 @@
       <h2>Verify + Debug</h2>
 
       <div class="step-label">Check everything is working</div>
-      <div class="code-block" onclick="copyCode(this)">pgrep -x AmphetamineXL && pmset -g assertions | grep -E "AmphetamineXL|UserIsActive" && pmset -g | grep -E "standby|hibernatemode|autopoweroff"</div>
+      <div class="code-block" onclick="copyCode(this)">pgrep -x AmphetamineXL && pmset -g assertions | grep -E "AmphetamineXL|caffeinate|UserIsActive" && pmset -g live | grep -E "SleepDisabled|standby|hibernatemode|sleep|displaysleep"</div>
 
       <div class="step-label">View app logs</div>
       <div class="code-block" onclick="copyCode(this)">log show --predicate 'subsystem == "com.hannojacobs.AmphetamineXL"' --last 10m && open ~/Library/Application\ Support/AmphetamineXL/Logs</div>
@@ -286,8 +286,8 @@
       <div class="step-label">Check sleep/wake history + lid state</div>
       <div class="code-block" onclick="copyCode(this)">pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20 && /usr/sbin/ioreg -r -k AppleClamshellState | grep AppleClamshellState</div>
 
-      <div class="step-label">Fallback to legacy max-awake mode</div>
-      <div class="code-block" onclick="copyCode(this)">defaults write com.hannojacobs.AmphetamineXL wakeProfile legacy-max-awake</div>
+      <div class="step-label">Runtime contract</div>
+      <div class="code-block" onclick="copyCode(this)">Caffeine ON => legacy-max-awake; Caffeine OFF or app quit => restore normal sleep-capable machine state</div>
     </div>
 
     <div class="section">

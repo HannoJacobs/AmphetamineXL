@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+> Active mode is now always max-awake, with normal sleep restored on disable or quit.
+
+### What changed
+- **Active runtime contract simplified:** Caffeine ON now always applies the aggressive `legacy-max-awake` machine profile. The retired `fixed-default` path remains only for backwards-compatible decoding of older session state and logs.
+- **Normal sleep restored when inactive:** Disabling caffeine or quitting the app restores the exact pre-activation `pmset` snapshot, including `sleep`, `displaysleep`, `standby`, `hibernatemode`, and `disablesleep`.
+- **Better power diagnostics:** Logs now explicitly record the active runtime contract and `SleepDisabled` before apply, after apply, and after restore.
+- **Safer helper teardown:** The `caffeinate` termination callback no longer mutates tracked session state directly, avoiding the exclusivity crash seen when disabling caffeine from the menu bar.
+
 ## v2.3.2 — 2026-04-02 (current)
 > Fix the default-on launch source and keep the inactive menu bar item visible.
 
@@ -22,7 +31,7 @@
 - **Crash-safe caffeinate:** Replaced the raw helper with `caffeinate -s -w <app pid>` so it follows the app lifecycle and no longer survives normal app exits or crashes.
 - **Single shutdown path:** Disable, menu quit, app termination, and launch recovery now all use the same teardown logic. Assertions, timers, `caffeinate`, and app-owned `pmset` state are cleaned up in one place.
 - **Session recovery:** On launch, the app loads the previous session state, kills any recorded stale `caffeinate`, restores app-owned `pmset` keys after unclean exits, and logs the entire recovery pass before re-enabling caffeine.
-- **Power profiles:** Added hidden `wakeProfile` support with `fixed-default` as the default and `legacy-max-awake` as the built-in rollback profile. The legacy profile can reapply the more aggressive `sleep 0`, `displaysleep 0`, and `disablesleep 1` behavior while still keeping the new cleanup logic.
+- **Power profiles:** Added hidden `wakeProfile` support with `fixed-default` as the original default and `legacy-max-awake` as the built-in rollback profile. Later work on `main` simplified normal active runtime to always use `legacy-max-awake`.
 - **Owned pmset restore:** The app now snapshots the exact per-source values it changes and restores those exact values instead of assuming system defaults.
 - **Persistent diagnostics:** Added rotating file logs in `~/Library/Application Support/AmphetamineXL/Logs/` alongside `os.log`, 30-second heartbeats, startup snapshots, anomaly dumps, command stdout/stderr capture, and a menu action to open the logs immediately.
 - **Rollback artifacts:** The app writes a baseline snapshot in Application Support so future investigations can compare current state to the first fixed-build launch state.

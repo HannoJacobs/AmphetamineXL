@@ -6,7 +6,7 @@ Full briefing: see `AGENTS.md`. This file is the concise session-start reference
 
 ---
 
-## How It Works (v2.3.2)
+## How It Works (post-v2.3.2 `main`)
 
 **The core fix is CGEvent mouse jiggle.** Every 1 second (only when lid is closed), posts `CGEventCreateMouseEvent(.mouseMoved)` to move cursor 1px right then back. WindowServer registers this as `UserIsActive` HID activity. The SMC respects HID activity and won't enter clamshell sleep.
 
@@ -16,7 +16,7 @@ This was reverse-engineered from Amphetamine's binary (their "Drive Alive" featu
 
 ### Lid-Aware Behavior
 
-**Lid open:** 2 IOKit assertions + caffeinate + network keepalive. Screen dims/locks normally. No jiggle.
+**Lid open:** 2 IOKit assertions + `caffeinate` + network keepalive + aggressive max-awake `pmset` profile. No jiggle.
 
 **Lid closed:** All of the above PLUS auto-lock (ScreenSaverEngine) → display off (`pmset displaysleepnow`) → mouse jiggle (1s) → display assertion held.
 
@@ -28,9 +28,16 @@ This was reverse-engineered from Amphetamine's binary (their "Drive Alive" featu
 2. IOKit assertions (x2 open, x3 closed)
 3. caffeinate -s subprocess — kernel-level
 4. Network keepalive (3s) — 5 DNS hosts, UDP + TCP probes
-5. Auto-lock + display off on lid close
-6. os.log logging — subsystem `com.hannojacobs.AmphetamineXL`
-7. Sleep/wake notification handlers — restart timers on wake
+5. Max-awake `pmset` profile while active, exact restore while inactive
+6. Auto-lock + display off on lid close
+7. os.log + rotating file logs — subsystem `com.hannojacobs.AmphetamineXL`
+8. Sleep/wake notification handlers — restart timers on wake
+
+### Active Runtime Contract
+
+- Caffeine ON: always `legacy-max-awake`
+- Caffeine OFF: app stays resident, but restores normal sleep-capable settings
+- Old `fixed-default` values still decode from older session files, but are no longer used for normal runtime
 
 ## Key Files
 

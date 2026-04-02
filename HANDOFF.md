@@ -1,7 +1,7 @@
 # AmphetamineXL — Handoff Document
 
-**Date:** 2026-03-20
-**Status:** ✅ WORKING — v2.3.2 in progress. Wake stack cleanup, recovery, rollback diagnostics, visible inactive menu bar state, and clean default-on launch semantics are in place around the proven lid-close behavior.
+**Date:** 2026-04-02
+**Status:** ✅ WORKING — post-v2.3.2 `main`. Active mode now always uses the aggressive max-awake profile, while disable and quit restore normal sleep-capable settings.
 
 ---
 
@@ -11,7 +11,8 @@ AmphetamineXL — a macOS menu bar app that prevents Mac sleep when lid is close
 - Repo: `/Users/hannojacobs/Documents/Code/AmphetamineXL`
 - GitHub: https://github.com/HannoJacobs/AmphetamineXL
 - Installed: `/Applications/AmphetamineXL.app`
-- Current version: v2.3.2
+- Current release: v2.3.2
+- Current repo state: post-v2.3.2 `main`
 
 ## The Problem (solved)
 
@@ -34,7 +35,7 @@ Every 1 second, the app posts `CGEventCreateMouseEvent(.mouseMoved)` to move the
 2. **IOKit assertions** — PreventUserIdleSystemSleep + PreventSystemSleep + PreventUserIdleDisplaySleep
 3. **caffeinate -s subprocess** — kernel-level sleep prevention
 4. **Network keepalive** — rotates 5 DNS servers (Cloudflare, Google, Quad9, OpenDNS, Cloudflare secondary), UDP DNS lookup + TCP SYN probe every 3s
-5. **pmset overrides** — standby 0, hibernatemode 0, autopoweroff 0
+5. **pmset max-awake profile** — while active, force `standby 0`, `hibernatemode 0`, `sleep 0`, `displaysleep 0`, `disablesleep 1` and restore the exact prior values when inactive
 
 ## Logging
 
@@ -72,9 +73,9 @@ On Apple Silicon with no external display, lid-close is a hardware event handled
 
 This is fundamentally different from Intel Macs where `caffeinate -s` was sufficient.
 
-## Lid-Aware Behavior (v2.3.2)
+## Lid-Aware Behavior (current `main`)
 
-**Lid open:** Screen dims/locks normally. Only system sleep assertions + caffeinate + keepalive active.
+**Lid open:** No mouse jiggle. Assertions, `caffeinate`, keepalive, and the aggressive max-awake `pmset` profile remain active.
 
 **Lid closed:**
 1. Screen locks via ScreenSaverEngine
@@ -84,7 +85,8 @@ This is fundamentally different from Intel Macs where `caffeinate -s` was suffic
 
 Detection: `AppleClamshellState` polled every 2s via IOKit `IOPMrootDomain`.
 
-## Future Improvements (not yet implemented)
+## Current Runtime Contract
 
-- Privileged helper to set/unset `disablesleep` via pmset (like Amphetamine's `installPowerProtectSudoOverride`)
-- Battery safeguard — auto-disable caffeine below X% battery
+- Caffeine ON: always `legacy-max-awake`
+- Caffeine OFF: app remains in the menu bar, but restores normal sleep-capable settings
+- App quit or crash recovery: restore previously owned `pmset` values before continuing
