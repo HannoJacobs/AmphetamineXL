@@ -63,9 +63,27 @@ final class MonitoredActivityTests: XCTestCase {
         XCTAssertTrue(WakeMode.autoAwake.autoWakeEnabled)
         XCTAssertTrue(WakeMode.autoAwake.showsAutoAwakeMonitor)
         XCTAssertEqual(WakeMode.autoAwake.menuBarIcon(isWakeStackRunning: false), "bolt.circle")
-        XCTAssertEqual(WakeMode.autoAwake.menuBarIcon(isWakeStackRunning: true), "bolt.circle.fill")
         XCTAssertEqual(WakeMode.autoAwake.statusTitle(isWakeStackRunning: false), "Auto-awake")
         XCTAssertEqual(WakeMode.autoAwake.descriptionText, "Wake only when Codex or Claude work is active, then release automatically.")
+    }
+
+    func testWakeModeAutoAwakeUsesHollowIconWithoutTasking() {
+        XCTAssertEqual(WakeMode.autoAwake.autoAwakeMenuBarIcon(hasTaskingActivity: false), "bolt.circle")
+    }
+
+    func testWakeModeAutoAwakeUsesFilledIconWithTasking() {
+        XCTAssertEqual(WakeMode.autoAwake.autoAwakeMenuBarIcon(hasTaskingActivity: true), "bolt.circle.fill")
+    }
+
+    func testWakeModeResolvedMenuBarIconUsesComputedIconWhenMenuNotPresented() {
+        XCTAssertEqual(
+            WakeMode.autoAwake.resolvedMenuBarIcon(
+                currentIcon: "bolt.circle.fill",
+                isMenuPresented: false,
+                frozenIcon: nil
+            ),
+            "bolt.circle.fill"
+        )
     }
 
     func testWakeModeManualUsesManualPresentation() {
@@ -80,7 +98,7 @@ final class MonitoredActivityTests: XCTestCase {
     func testMenuBarIconStaysFrozenWhileMenuIsPresented() {
         XCTAssertEqual(
             WakeMode.manual.resolvedMenuBarIcon(
-                isWakeStackRunning: true,
+                currentIcon: "bolt.fill",
                 isMenuPresented: true,
                 frozenIcon: "bolt.circle"
             ),
@@ -89,7 +107,7 @@ final class MonitoredActivityTests: XCTestCase {
 
         XCTAssertEqual(
             WakeMode.manual.resolvedMenuBarIcon(
-                isWakeStackRunning: true,
+                currentIcon: "bolt.fill",
                 isMenuPresented: false,
                 frozenIcon: "bolt.circle"
             ),
@@ -100,6 +118,44 @@ final class MonitoredActivityTests: XCTestCase {
     func testClosedLidRequestsImmediateSleepAfterWakeStackStops() {
         XCTAssertTrue(ClosedLidSleepResolver.shouldRequestSleep(lidClosed: true))
         XCTAssertFalse(ClosedLidSleepResolver.shouldRequestSleep(lidClosed: false))
+    }
+
+    func testClosedLidIgnoresCooldownWithoutTaskingActivity() {
+        let runtimeStatus = MonitoredRuntimeStatus(codex: .idle, claudeCode: .idle)
+        let decision = MonitoredActivityDecision(
+            activeSources: [],
+            shouldPreventSleep: true,
+            isCoolingDown: true,
+            cooldownExpiresAt: Date().addingTimeInterval(20)
+        )
+
+        XCTAssertFalse(
+            AutoAwakeHoldResolver.shouldKeepWakeStackEnabled(
+                wakeMode: .autoAwake,
+                decision: decision,
+                runtimeStatus: runtimeStatus,
+                lidClosed: true
+            )
+        )
+    }
+
+    func testClosedLidKeepsWakeEnabledWhileTaskingActivityExists() {
+        let runtimeStatus = MonitoredRuntimeStatus(codex: .tasking, claudeCode: .idle)
+        let decision = MonitoredActivityDecision(
+            activeSources: [.codexCLI],
+            shouldPreventSleep: true,
+            isCoolingDown: false,
+            cooldownExpiresAt: Date().addingTimeInterval(20)
+        )
+
+        XCTAssertTrue(
+            AutoAwakeHoldResolver.shouldKeepWakeStackEnabled(
+                wakeMode: .autoAwake,
+                decision: decision,
+                runtimeStatus: runtimeStatus,
+                lidClosed: true
+            )
+        )
     }
 
     func testDetectsCodexCLIProcess() {

@@ -10,6 +10,8 @@ struct MenuBarView: View {
             modePickerRow
             if appState.showsAutoAwakeMonitor {
                 Divider()
+                activityWindowSection
+                Divider()
                 monitorSection
             }
             Divider()
@@ -81,26 +83,30 @@ struct MenuBarView: View {
         .padding(.vertical, 12)
     }
 
+    private var activityWindowSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(appState.activityWindowLabelText)
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            Slider(
+                value: Binding(
+                    get: { appState.activityWindowSeconds },
+                    set: { appState.setActivityWindowSeconds($0) }
+                ),
+                in: ActivityWindowSettings.minimumSeconds...ActivityWindowSettings.maximumSeconds,
+                step: ActivityWindowSettings.stepSeconds
+            )
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
     private var monitorSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Auto-awake Monitor")
                 .font(.caption)
                 .foregroundColor(.secondary)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(appState.activityWindowLabelText)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                Slider(
-                    value: Binding(
-                        get: { appState.activityWindowSeconds },
-                        set: { appState.setActivityWindowSeconds($0) }
-                    ),
-                    in: ActivityWindowSettings.minimumSeconds...ActivityWindowSettings.maximumSeconds,
-                    step: ActivityWindowSettings.stepSeconds
-                )
-            }
 
             monitorRow(
                 title: "Codex",

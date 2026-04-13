@@ -22,10 +22,14 @@ enum WakeMode: String, CaseIterable, Codable {
         case .disabled:
             return "bolt.slash"
         case .autoAwake:
-            return isWakeStackRunning ? "bolt.circle.fill" : "bolt.circle"
+            return "bolt.circle"
         case .manual:
             return "bolt.fill"
         }
+    }
+
+    func autoAwakeMenuBarIcon(hasTaskingActivity: Bool) -> String {
+        hasTaskingActivity ? "bolt.circle.fill" : "bolt.circle"
     }
 
     func heroIcon(isWakeStackRunning: Bool) -> String {
@@ -69,22 +73,43 @@ enum WakeMode: String, CaseIterable, Codable {
         self == .autoAwake
     }
 
-    func resolvedMenuBarIcon(
-        isWakeStackRunning: Bool,
-        isMenuPresented: Bool,
-        frozenIcon: String?
-    ) -> String {
+    func resolvedMenuBarIcon(currentIcon: String, isMenuPresented: Bool, frozenIcon: String?) -> String {
         if isMenuPresented, let frozenIcon {
             return frozenIcon
         }
 
-        return menuBarIcon(isWakeStackRunning: isWakeStackRunning)
+        return currentIcon
     }
 }
 
 struct ClosedLidSleepResolver {
     static func shouldRequestSleep(lidClosed: Bool) -> Bool {
         lidClosed
+    }
+}
+
+struct AutoAwakeHoldResolver {
+    static func shouldKeepWakeStackEnabled(
+        wakeMode: WakeMode,
+        decision: MonitoredActivityDecision,
+        runtimeStatus: MonitoredRuntimeStatus,
+        lidClosed: Bool
+    ) -> Bool {
+        guard wakeMode == .autoAwake else {
+            return decision.shouldPreventSleep
+        }
+
+        if !lidClosed {
+            return decision.shouldPreventSleep
+        }
+
+        let hasTaskingActivity =
+            runtimeStatus.codex == .tasking
+            || runtimeStatus.codex == .taskingAndQueued
+            || runtimeStatus.claudeCode == .tasking
+            || runtimeStatus.claudeCode == .taskingAndQueued
+
+        return hasTaskingActivity
     }
 }
 
@@ -158,8 +183,15 @@ final class AppState {
     private let powerProfileManager: PowerProfileManager
 
     var menuBarIcon: String {
-        wakeMode.resolvedMenuBarIcon(
-            isWakeStackRunning: isActive,
+        let computedIcon: String
+        if wakeMode == .autoAwake {
+            computedIcon = wakeMode.autoAwakeMenuBarIcon(hasTaskingActivity: hasTaskingActivity)
+        } else {
+            computedIcon = wakeMode.menuBarIcon(isWakeStackRunning: isActive)
+        }
+
+        return wakeMode.resolvedMenuBarIcon(
+            currentIcon: computedIcon,
             isMenuPresented: isMenuPresented,
             frozenIcon: frozenMenuBarIcon
         )
@@ -199,6 +231,13 @@ final class AppState {
 
     var activityWindowLabelText: String {
         "Activity Window: \(Int(activityWindowSeconds))s"
+    }
+
+    var hasTaskingActivity: Bool {
+        runtimeMonitorStatus.codex == .tasking
+            || runtimeMonitorStatus.codex == .taskingAndQueued
+            || runtimeMonitorStatus.claudeCode == .tasking
+            || runtimeMonitorStatus.claudeCode == .taskingAndQueued
     }
 
     init() {
@@ -312,7 +351,7 @@ final class AppState {
 
     func menuDidAppear() {
         isMenuPresented = true
-        frozenMenuBarIcon = wakeMode.menuBarIcon(isWakeStackRunning: isActive)
+        frozenMenuBarIcon = menuBarIcon
     }
 
     func menuDidDisappear() {
@@ -1132,7 +1171,12 @@ final class AppState {
             in: snapshot,
             selection: monitoringSelection
         )
-        monitoredHoldRequested = wakeMode.autoWakeEnabled && decision.shouldPreventSleep
+        monitoredHoldRequested = AutoAwakeHoldResolver.shouldKeepWakeStackEnabled(
+            wakeMode: wakeMode,
+            decision: decision,
+            runtimeStatus: runtimeMonitorStatus,
+            lidClosed: isDisplayAsleep || isLidClosed()
+        )
         updateMonitoringStatusText()
 
         let stateChanged = previousDecision.shouldPreventSleep != decision.shouldPreventSleep
