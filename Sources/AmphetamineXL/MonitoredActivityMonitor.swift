@@ -5,6 +5,7 @@ struct ActivityWindowSettings {
     static let minimumSeconds: Double = 10
     static let maximumSeconds: Double = 120
     static let stepSeconds: Double = 5
+    static let immediateSeconds: Double = 5
 
     static func normalize(_ rawValue: Double) -> Double {
         let clamped = min(max(rawValue, minimumSeconds), maximumSeconds)
@@ -43,7 +44,10 @@ struct MonitoredActivitySnapshot {
     let claudeTodoTaskCount: Int
     let claudeSessionPIDs: [Int32]
     let hasRecentCodexThreadActivity: Bool
+    let hasActiveCodexTurn: Bool
+    let hasImmediateCodexThreadActivity: Bool
     let recentClaudeProjectActivityCount: Int
+    let immediateClaudeProjectActivityCount: Int
 
     init(
         runningProcesses: [RunningProcess],
@@ -51,14 +55,20 @@ struct MonitoredActivitySnapshot {
         claudeTodoTaskCount: Int,
         claudeSessionPIDs: [Int32],
         hasRecentCodexThreadActivity: Bool = false,
-        recentClaudeProjectActivityCount: Int = 0
+        hasActiveCodexTurn: Bool = false,
+        hasImmediateCodexThreadActivity: Bool = false,
+        recentClaudeProjectActivityCount: Int = 0,
+        immediateClaudeProjectActivityCount: Int = 0
     ) {
         self.runningProcesses = runningProcesses
         self.codexQueuedFollowUpCount = codexQueuedFollowUpCount
         self.claudeTodoTaskCount = claudeTodoTaskCount
         self.claudeSessionPIDs = claudeSessionPIDs
         self.hasRecentCodexThreadActivity = hasRecentCodexThreadActivity
+        self.hasActiveCodexTurn = hasActiveCodexTurn
+        self.hasImmediateCodexThreadActivity = hasImmediateCodexThreadActivity
         self.recentClaudeProjectActivityCount = recentClaudeProjectActivityCount
+        self.immediateClaudeProjectActivityCount = immediateClaudeProjectActivityCount
     }
 }
 
@@ -187,8 +197,9 @@ struct MonitoredActivityMonitor {
     ) -> Set<MonitoredActivitySource> {
         var sources = Set<MonitoredActivitySource>()
         let liveClaudePIDs = Set(snapshot.claudeSessionPIDs)
-        let hasCodexAppTask = selection.codexEnabled && snapshot.hasRecentCodexThreadActivity && snapshot.runningProcesses.contains { process in
-            matchesCodexApp(process.commandLine.lowercased())
+        let hasCodexAppTask = selection.codexEnabled && snapshot.runningProcesses.contains { process in
+            let command = process.commandLine.lowercased()
+            return matchesCodexApp(command) && (snapshot.hasActiveCodexTurn || snapshot.hasRecentCodexThreadActivity)
         }
         let hasCodexCLITask = selection.codexEnabled && snapshot.runningProcesses.contains { process in
             matchesCodexCLI(process.commandLine.lowercased())
@@ -224,7 +235,7 @@ struct MonitoredActivityMonitor {
         let codexIsTasking = selection.codexEnabled && snapshot.runningProcesses.contains(where: { process in
             let command = process.commandLine.lowercased()
             return matchesCodexCLI(command)
-                || (snapshot.hasRecentCodexThreadActivity && matchesCodexApp(command))
+                || ((snapshot.hasActiveCodexTurn || snapshot.hasRecentCodexThreadActivity) && matchesCodexApp(command))
         })
         let codex: MonitoredRuntimeState
         codex = selection.codexEnabled
@@ -241,6 +252,23 @@ struct MonitoredActivityMonitor {
             : .disabled
 
         return MonitoredRuntimeStatus(codex: codex, claudeCode: claudeCode)
+    }
+
+    static func hasImmediateTaskingActivity(
+        in snapshot: MonitoredActivitySnapshot,
+        selection: MonitoringSelection = .all
+    ) -> Bool {
+        let liveClaudePIDs = Set(snapshot.claudeSessionPIDs)
+        let hasImmediateCodexTask = selection.codexEnabled && snapshot.runningProcesses.contains(where: { process in
+            let command = process.commandLine.lowercased()
+            return matchesCodexCLI(command)
+                || ((snapshot.hasActiveCodexTurn || snapshot.hasImmediateCodexThreadActivity) && matchesCodexApp(command))
+        })
+        let hasImmediateClaudeTask = selection.claudeEnabled && snapshot.runningProcesses.contains(where: { process in
+            liveClaudePIDs.contains(process.pid) && matchesClaudeCode(process.commandLine.lowercased())
+        }) && snapshot.immediateClaudeProjectActivityCount > 0
+
+        return hasImmediateCodexTask || hasImmediateClaudeTask
     }
 
     private static func combine(tasking: Bool, queued: Bool) -> MonitoredRuntimeState {
@@ -307,9 +335,15 @@ final class MonitoredActivityProbe: @unchecked Sendable {
             claudeTodoTaskCount: claudeTodoTaskCount(),
             claudeSessionPIDs: claudeSessions.map(\.pid),
             hasRecentCodexThreadActivity: hasRecentCodexThreadActivity(activityWindow: activityWindow),
+            hasActiveCodexTurn: hasActiveCodexTurn(),
+            hasImmediateCodexThreadActivity: hasRecentCodexThreadActivity(activityWindow: ActivityWindowSettings.immediateSeconds),
             recentClaudeProjectActivityCount: recentClaudeProjectActivityCount(
                 for: claudeSessions,
                 activityWindow: activityWindow
+            ),
+            immediateClaudeProjectActivityCount: recentClaudeProjectActivityCount(
+                for: claudeSessions,
+                activityWindow: ActivityWindowSettings.immediateSeconds
             )
         )
     }
@@ -421,6 +455,63 @@ final class MonitoredActivityProbe: @unchecked Sendable {
         }
 
         return (Int(result.stdout) ?? 0) > 0
+    }
+
+    private func hasActiveCodexTurn() -> Bool {
+        let databaseURL = homeDirectoryURL.appendingPathComponent(".codex/state_5.sqlite")
+        guard
+            fileManager.fileExists(atPath: databaseURL.path),
+            let result = try? commandRunner.run(
+                "/usr/bin/sqlite3",
+                arguments: [
+                    databaseURL.path,
+                    "select rollout_path from threads where archived = 0 order by updated_at desc limit 1;"
+                ]
+            )
+        else {
+            return false
+        }
+
+        let rolloutPath = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rolloutPath.isEmpty else {
+            return false
+        }
+
+        let rolloutURL = URL(fileURLWithPath: rolloutPath)
+        guard let handle = try? FileHandle(forReadingFrom: rolloutURL) else {
+            return false
+        }
+        defer { try? handle.close() }
+
+        let data = (try? handle.readToEnd()) ?? Data()
+        guard let content = String(data: data, encoding: .utf8) else {
+            return false
+        }
+
+        var activeTurns = Set<String>()
+        for line in content.split(separator: "\n") {
+            guard
+                let jsonData = line.data(using: .utf8),
+                let object = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                object["type"] as? String == "event_msg",
+                let payload = object["payload"] as? [String: Any],
+                let eventType = payload["type"] as? String,
+                let turnID = payload["turn_id"] as? String
+            else {
+                continue
+            }
+
+            switch eventType {
+            case "task_started":
+                activeTurns.insert(turnID)
+            case "task_complete", "turn_aborted":
+                activeTurns.remove(turnID)
+            default:
+                break
+            }
+        }
+
+        return !activeTurns.isEmpty
     }
 
     private func recentClaudeProjectActivityCount(

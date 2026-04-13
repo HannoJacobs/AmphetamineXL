@@ -93,6 +93,7 @@ struct AutoAwakeHoldResolver {
         wakeMode: WakeMode,
         decision: MonitoredActivityDecision,
         runtimeStatus: MonitoredRuntimeStatus,
+        hasImmediateTaskingActivity: Bool,
         lidClosed: Bool
     ) -> Bool {
         guard wakeMode == .autoAwake else {
@@ -103,13 +104,7 @@ struct AutoAwakeHoldResolver {
             return decision.shouldPreventSleep
         }
 
-        let hasTaskingActivity =
-            runtimeStatus.codex == .tasking
-            || runtimeStatus.codex == .taskingAndQueued
-            || runtimeStatus.claudeCode == .tasking
-            || runtimeStatus.claudeCode == .taskingAndQueued
-
-        return hasTaskingActivity
+        return hasImmediateTaskingActivity
     }
 }
 
@@ -1175,6 +1170,10 @@ final class AppState {
             wakeMode: wakeMode,
             decision: decision,
             runtimeStatus: runtimeMonitorStatus,
+            hasImmediateTaskingActivity: MonitoredActivityMonitor.hasImmediateTaskingActivity(
+                in: snapshot,
+                selection: monitoringSelection
+            ),
             lidClosed: isDisplayAsleep || isLidClosed()
         )
         updateMonitoringStatusText()

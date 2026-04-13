@@ -134,6 +134,27 @@ final class MonitoredActivityTests: XCTestCase {
                 wakeMode: .autoAwake,
                 decision: decision,
                 runtimeStatus: runtimeStatus,
+                hasImmediateTaskingActivity: false,
+                lidClosed: true
+            )
+        )
+    }
+
+    func testClosedLidIgnoresActivityWindowDerivedTaskingWithoutImmediateWork() {
+        let runtimeStatus = MonitoredRuntimeStatus(codex: .tasking, claudeCode: .idle)
+        let decision = MonitoredActivityDecision(
+            activeSources: [.codexApp],
+            shouldPreventSleep: true,
+            isCoolingDown: false,
+            cooldownExpiresAt: Date().addingTimeInterval(20)
+        )
+
+        XCTAssertFalse(
+            AutoAwakeHoldResolver.shouldKeepWakeStackEnabled(
+                wakeMode: .autoAwake,
+                decision: decision,
+                runtimeStatus: runtimeStatus,
+                hasImmediateTaskingActivity: false,
                 lidClosed: true
             )
         )
@@ -153,6 +174,7 @@ final class MonitoredActivityTests: XCTestCase {
                 wakeMode: .autoAwake,
                 decision: decision,
                 runtimeStatus: runtimeStatus,
+                hasImmediateTaskingActivity: true,
                 lidClosed: true
             )
         )
@@ -198,7 +220,8 @@ final class MonitoredActivityTests: XCTestCase {
             codexQueuedFollowUpCount: 0,
             claudeTodoTaskCount: 0,
             claudeSessionPIDs: [],
-            hasRecentCodexThreadActivity: true
+            hasRecentCodexThreadActivity: true,
+            hasActiveCodexTurn: true
         )
 
         let sources = MonitoredActivityMonitor.activeSources(in: snapshot)
@@ -392,12 +415,32 @@ final class MonitoredActivityTests: XCTestCase {
             codexQueuedFollowUpCount: 2,
             claudeTodoTaskCount: 0,
             claudeSessionPIDs: [],
-            hasRecentCodexThreadActivity: true
+            hasRecentCodexThreadActivity: true,
+            hasActiveCodexTurn: true
         )
 
         let status = MonitoredActivityMonitor.runtimeStatus(in: snapshot)
 
         XCTAssertEqual(status.codex, .taskingAndQueued)
+    }
+
+    func testTreatsCodexAppServerWithActiveTurnAsTaskingEvenWithoutRecentActivityWindow() {
+        let snapshot = MonitoredActivitySnapshot(
+            runningProcesses: [
+                RunningProcess(pid: 100, commandLine: "/Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled")
+            ],
+            codexQueuedFollowUpCount: 0,
+            claudeTodoTaskCount: 0,
+            claudeSessionPIDs: [],
+            hasRecentCodexThreadActivity: false,
+            hasActiveCodexTurn: true
+        )
+
+        let sources = MonitoredActivityMonitor.activeSources(in: snapshot)
+        let status = MonitoredActivityMonitor.runtimeStatus(in: snapshot)
+
+        XCTAssertEqual(sources, [.codexApp])
+        XCTAssertEqual(status.codex, .tasking)
     }
 
     func testRuntimeMonitorMarksClaudeAsQueuedWhenTodosRemain() {
