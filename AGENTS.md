@@ -167,6 +167,21 @@ pmset -g assertions | grep AmphetamineXL  # must show assertions
 
 ---
 
+## Debug Research First
+
+For sticky debugging issues, hardware-related problems, Swift code issues, macOS platform behavior, Bluetooth issues, or anything that looks like a system or framework edge case, spend significant time searching the web for relevant context before attempting to debug.
+
+Pull that external context into the working set first:
+
+- Search for current Apple documentation, forum threads, bug reports, release notes, and credible writeups.
+- Look for version-specific Swift, AppKit, SwiftUI, macOS, CoreBluetooth, IOBluetooth, codesigning, sandboxing, and entitlement behavior.
+- Prefer gathering multiple relevant sources before forming a debugging plan.
+- Use that research to shape hypotheses, reproduction steps, instrumentation, and fixes instead of debugging from memory alone.
+
+Do not treat these issues like ordinary local code bugs when surrounding platform behavior is likely part of the problem. Research first, then debug.
+
+---
+
 ## Debugging Commands
 
 ```bash
