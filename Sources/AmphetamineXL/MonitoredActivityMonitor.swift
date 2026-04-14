@@ -235,7 +235,7 @@ struct MonitoredActivityMonitor {
         let codexIsTasking = selection.codexEnabled && snapshot.runningProcesses.contains(where: { process in
             let command = process.commandLine.lowercased()
             return matchesCodexCLI(command)
-                || ((snapshot.hasActiveCodexTurn || snapshot.hasRecentCodexThreadActivity) && matchesCodexApp(command))
+                || ((snapshot.hasActiveCodexTurn || snapshot.hasImmediateCodexThreadActivity) && matchesCodexApp(command))
         })
         let codex: MonitoredRuntimeState
         codex = selection.codexEnabled
@@ -245,7 +245,7 @@ struct MonitoredActivityMonitor {
         let liveClaudePIDs = Set(snapshot.claudeSessionPIDs)
         let claudeIsTasking = selection.claudeEnabled && snapshot.runningProcesses.contains(where: { process in
             liveClaudePIDs.contains(process.pid) && matchesClaudeCode(process.commandLine.lowercased())
-        }) && snapshot.recentClaudeProjectActivityCount > 0
+        }) && snapshot.immediateClaudeProjectActivityCount > 0
         let claudeCode: MonitoredRuntimeState
         claudeCode = selection.claudeEnabled
             ? combine(tasking: claudeIsTasking, queued: snapshot.claudeTodoTaskCount > 0)
@@ -285,7 +285,7 @@ struct MonitoredActivityMonitor {
     }
 
     private static func matchesCodexApp(_ command: String) -> Bool {
-        return command.contains("codex app-server")
+        command.contains("codex app-server") && command.contains("/codex.app/")
     }
 
     private static func matchesCodexCLI(_ command: String) -> Bool {
@@ -488,7 +488,12 @@ final class MonitoredActivityProbe: @unchecked Sendable {
             return false
         }
 
-        var activeTurns = Set<String>()
+        return Self.hasActiveCodexTurn(inRolloutContent: content)
+    }
+
+    static func hasActiveCodexTurn(inRolloutContent content: String) -> Bool {
+        var latestLifecycleEventType: String?
+
         for line in content.split(separator: "\n") {
             guard
                 let jsonData = line.data(using: .utf8),
@@ -496,22 +501,15 @@ final class MonitoredActivityProbe: @unchecked Sendable {
                 object["type"] as? String == "event_msg",
                 let payload = object["payload"] as? [String: Any],
                 let eventType = payload["type"] as? String,
-                let turnID = payload["turn_id"] as? String
+                ["task_started", "task_complete", "turn_aborted"].contains(eventType)
             else {
                 continue
             }
 
-            switch eventType {
-            case "task_started":
-                activeTurns.insert(turnID)
-            case "task_complete", "turn_aborted":
-                activeTurns.remove(turnID)
-            default:
-                break
-            }
+            latestLifecycleEventType = eventType
         }
 
-        return !activeTurns.isEmpty
+        return latestLifecycleEventType == "task_started"
     }
 
     private func recentClaudeProjectActivityCount(

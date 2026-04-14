@@ -2,6 +2,26 @@ import XCTest
 @testable import AmphetamineXL
 
 final class MonitoredActivityTests: XCTestCase {
+    func testCodexActiveTurnParserIgnoresStaleUnmatchedStartedEvents() {
+        let rollout = """
+        {"timestamp":"2026-04-14T08:00:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"stale-turn"}}
+        {"timestamp":"2026-04-14T08:01:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"fresh-turn"}}
+        {"timestamp":"2026-04-14T08:02:00.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"fresh-turn"}}
+        """
+
+        XCTAssertFalse(MonitoredActivityProbe.hasActiveCodexTurn(inRolloutContent: rollout))
+    }
+
+    func testCodexActiveTurnParserTreatsLatestStartedEventAsActive() {
+        let rollout = """
+        {"timestamp":"2026-04-14T08:00:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"finished-turn"}}
+        {"timestamp":"2026-04-14T08:01:00.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"finished-turn"}}
+        {"timestamp":"2026-04-14T08:02:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"active-turn"}}
+        """
+
+        XCTAssertTrue(MonitoredActivityProbe.hasActiveCodexTurn(inRolloutContent: rollout))
+    }
+
     func testActivityWindowDefaultsToThirtySeconds() {
         XCTAssertEqual(ActivityWindowSettings.defaultSeconds, 30)
     }
@@ -443,6 +463,49 @@ final class MonitoredActivityTests: XCTestCase {
         XCTAssertEqual(status.codex, .tasking)
     }
 
+    func testDoesNotTreatVSCodeCodexAppServerAsCodexAppTasking() {
+        let snapshot = MonitoredActivitySnapshot(
+            runningProcesses: [
+                RunningProcess(
+                    pid: 100,
+                    commandLine: "/Users/test/.vscode/extensions/openai.chatgpt/bin/macos-aarch64/codex app-server --analytics-default-enabled"
+                )
+            ],
+            codexQueuedFollowUpCount: 0,
+            claudeTodoTaskCount: 0,
+            claudeSessionPIDs: [],
+            hasRecentCodexThreadActivity: true,
+            hasActiveCodexTurn: true,
+            hasImmediateCodexThreadActivity: true
+        )
+
+        let sources = MonitoredActivityMonitor.activeSources(in: snapshot)
+        let status = MonitoredActivityMonitor.runtimeStatus(in: snapshot)
+
+        XCTAssertEqual(sources, [])
+        XCTAssertEqual(status.codex, .idle)
+    }
+
+    func testRuntimeMonitorDoesNotTreatRecentOnlyCodexAppActivityAsTasking() {
+        let snapshot = MonitoredActivitySnapshot(
+            runningProcesses: [
+                RunningProcess(pid: 100, commandLine: "/Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled")
+            ],
+            codexQueuedFollowUpCount: 0,
+            claudeTodoTaskCount: 0,
+            claudeSessionPIDs: [],
+            hasRecentCodexThreadActivity: true,
+            hasActiveCodexTurn: false,
+            hasImmediateCodexThreadActivity: false
+        )
+
+        let sources = MonitoredActivityMonitor.activeSources(in: snapshot)
+        let status = MonitoredActivityMonitor.runtimeStatus(in: snapshot)
+
+        XCTAssertEqual(sources, [.codexApp])
+        XCTAssertEqual(status.codex, .idle)
+    }
+
     func testRuntimeMonitorMarksClaudeAsQueuedWhenTodosRemain() {
         let snapshot = MonitoredActivitySnapshot(
             runningProcesses: [],
@@ -465,12 +528,32 @@ final class MonitoredActivityTests: XCTestCase {
             codexQueuedFollowUpCount: 0,
             claudeTodoTaskCount: 0,
             claudeSessionPIDs: [200],
-            recentClaudeProjectActivityCount: 1
+            recentClaudeProjectActivityCount: 1,
+            immediateClaudeProjectActivityCount: 1
         )
 
         let status = MonitoredActivityMonitor.runtimeStatus(in: snapshot)
 
         XCTAssertEqual(status.claudeCode, .tasking)
+    }
+
+    func testRuntimeMonitorDoesNotTreatRecentOnlyClaudeActivityAsTasking() {
+        let snapshot = MonitoredActivitySnapshot(
+            runningProcesses: [
+                RunningProcess(pid: 200, commandLine: "claude")
+            ],
+            codexQueuedFollowUpCount: 0,
+            claudeTodoTaskCount: 0,
+            claudeSessionPIDs: [200],
+            recentClaudeProjectActivityCount: 1,
+            immediateClaudeProjectActivityCount: 0
+        )
+
+        let sources = MonitoredActivityMonitor.activeSources(in: snapshot)
+        let status = MonitoredActivityMonitor.runtimeStatus(in: snapshot)
+
+        XCTAssertEqual(sources, [.claudeCode])
+        XCTAssertEqual(status.claudeCode, .idle)
     }
 
     func testRuntimeMonitorMarksBothToolsAsTaskingWhenLiveProcessesExist() {
@@ -482,7 +565,8 @@ final class MonitoredActivityTests: XCTestCase {
             codexQueuedFollowUpCount: 0,
             claudeTodoTaskCount: 1,
             claudeSessionPIDs: [200],
-            recentClaudeProjectActivityCount: 1
+            recentClaudeProjectActivityCount: 1,
+            immediateClaudeProjectActivityCount: 1
         )
 
         let status = MonitoredActivityMonitor.runtimeStatus(in: snapshot)
