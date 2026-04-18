@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import LaunchAtLogin
 import os.log
 
 let appSubsystem = "com.hannojacobs.AmphetamineXL"
@@ -31,6 +30,7 @@ enum WakeProfile: String, Codable {
 
 enum ShutdownReason: String, Codable {
     case toggleOff
+    case automaticMonitorIdle
     case menuQuit
     case willTerminate
     case launchRecovery
@@ -70,7 +70,7 @@ enum CommandRunnerError: Error {
     case failedToLaunch(String)
 }
 
-final class CommandRunner {
+final class CommandRunner: @unchecked Sendable {
     static let shared = CommandRunner()
 
     func run(_ executablePath: String, arguments: [String] = []) throws -> CommandResult {
@@ -251,7 +251,7 @@ enum AppLogLevel: String {
     case critical
 }
 
-final class DiagnosticsLogger {
+final class DiagnosticsLogger: @unchecked Sendable {
     static let shared = DiagnosticsLogger()
 
     private let logger = Logger(subsystem: appSubsystem, category: "SleepPrevention")
