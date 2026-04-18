@@ -506,6 +506,40 @@ final class MonitoredActivityTests: XCTestCase {
         XCTAssertEqual(status.codex, .idle)
     }
 
+    func testRuntimeMonitorDoesNotTreatImmediateThreadRefreshAsCodexTaskingWithoutActiveTurn() {
+        let snapshot = MonitoredActivitySnapshot(
+            runningProcesses: [
+                RunningProcess(pid: 100, commandLine: "/Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled")
+            ],
+            codexQueuedFollowUpCount: 0,
+            claudeTodoTaskCount: 0,
+            claudeSessionPIDs: [],
+            hasRecentCodexThreadActivity: true,
+            hasActiveCodexTurn: false,
+            hasImmediateCodexThreadActivity: true
+        )
+
+        let status = MonitoredActivityMonitor.runtimeStatus(in: snapshot)
+
+        XCTAssertEqual(status.codex, .idle)
+    }
+
+    func testImmediateTaskingRequiresActiveCodexTurnForCodexApp() {
+        let snapshot = MonitoredActivitySnapshot(
+            runningProcesses: [
+                RunningProcess(pid: 100, commandLine: "/Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled")
+            ],
+            codexQueuedFollowUpCount: 0,
+            claudeTodoTaskCount: 0,
+            claudeSessionPIDs: [],
+            hasRecentCodexThreadActivity: true,
+            hasActiveCodexTurn: false,
+            hasImmediateCodexThreadActivity: true
+        )
+
+        XCTAssertFalse(MonitoredActivityMonitor.hasImmediateTaskingActivity(in: snapshot))
+    }
+
     func testRuntimeMonitorMarksClaudeAsQueuedWhenTodosRemain() {
         let snapshot = MonitoredActivitySnapshot(
             runningProcesses: [],

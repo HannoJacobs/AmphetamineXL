@@ -235,7 +235,7 @@ struct MonitoredActivityMonitor {
         let codexIsTasking = selection.codexEnabled && snapshot.runningProcesses.contains(where: { process in
             let command = process.commandLine.lowercased()
             return matchesCodexCLI(command)
-                || ((snapshot.hasActiveCodexTurn || snapshot.hasImmediateCodexThreadActivity) && matchesCodexApp(command))
+                || (snapshot.hasActiveCodexTurn && matchesCodexApp(command))
         })
         let codex: MonitoredRuntimeState
         codex = selection.codexEnabled
@@ -262,7 +262,7 @@ struct MonitoredActivityMonitor {
         let hasImmediateCodexTask = selection.codexEnabled && snapshot.runningProcesses.contains(where: { process in
             let command = process.commandLine.lowercased()
             return matchesCodexCLI(command)
-                || ((snapshot.hasActiveCodexTurn || snapshot.hasImmediateCodexThreadActivity) && matchesCodexApp(command))
+                || (snapshot.hasActiveCodexTurn && matchesCodexApp(command))
         })
         let hasImmediateClaudeTask = selection.claudeEnabled && snapshot.runningProcesses.contains(where: { process in
             liveClaudePIDs.contains(process.pid) && matchesClaudeCode(process.commandLine.lowercased())
