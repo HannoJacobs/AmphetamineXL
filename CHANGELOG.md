@@ -10,7 +10,14 @@
 - **Safer helper teardown:** The `caffeinate` termination callback no longer mutates tracked session state directly, avoiding the exclusivity crash seen when disabling caffeine from the menu bar.
 - **Validation note:** Initial user inspection on 2026-04-02 indicates this state appears to work well, but the intended decision window is several weeks of real use. If reliability regresses, the preferred fallback is the pre-change "nuclear option" baseline.
 
-## v2.3.2 — 2026-04-02 (current)
+## v2.3.3 — 2026-10-10 (current)
+> Keep disposable packaging app bundles out of Spotlight.
+
+- DMG packaging stages app copies inside `build-release.noindex` and removes them on success, failure, or interruption.
+- Packaging paths are rooted at the script directory, so invoking the script from another folder does not clean that folder's files.
+- `AMPHETAMINEXL_RELEASE_BINARY` can select an exact build output when multiple development worktrees exist.
+
+## v2.3.2 — 2026-04-02
 > Fix the default-on launch source and keep the inactive menu bar item visible.
 
 ### What changed

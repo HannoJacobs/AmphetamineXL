@@ -13,8 +13,8 @@ AmphetamineXL is a macOS menu bar app that prevents Apple Silicon clamshell slee
 - **Bundle ID**: `com.hannojacobs.AmphetamineXL`
 - **GitHub**: `HannoJacobs/AmphetamineXL`
 - **GitHub Pages**: `docs/` folder on `main` → https://hannojacobs.github.io/AmphetamineXL/
-- **Current release**: v2.3.2
-- **Current repo state**: post-v2.3.2 `main`
+- **Current release**: v2.3.3
+- **Current repo state**: v2.3.3 `main`
 
 ---
 
@@ -230,6 +230,8 @@ pmset -g | grep -E "standby|hibernatemode|autopoweroff"
 - Builds `.app` bundle from compiled binary
 - Writes `Info.plist` inline — **this is where you bump the version**
 - Creates DMG with Applications symlink
+- Stages disposable bundles in `build-release.noindex`, cleans them on exit, and writes the final DMG beside the script
+- Set `AMPHETAMINEXL_RELEASE_BINARY` to the exact Release executable when packaging from a specific worktree
 
 ---
 

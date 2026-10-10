@@ -2,4 +2,5 @@
 *.dmg
 .DS_Store
 DerivedData/
+build-release.noindex/
 *.xcuserstate
