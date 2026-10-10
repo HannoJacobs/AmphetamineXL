@@ -1,7 +1,7 @@
 # AmphetamineXL — Handoff Document
 
 **Date:** 2026-04-02
-**Status:** ✅ WORKING — post-v2.3.2 `main`. Active mode now always uses the aggressive max-awake profile, while disable and quit restore normal sleep-capable settings. Initial real-world inspection on 2026-04-02 looks good, but longer validation is still in progress.
+**Status:** ✅ WORKING — v2.3.3 `main`. Packaging now uses disposable Spotlight-excluded staging with exit cleanup. Active mode always uses the aggressive max-awake profile, while disable and quit restore normal sleep-capable settings. Initial real-world inspection on 2026-04-02 looks good, but longer validation is still in progress.
 
 ---
 
@@ -11,8 +11,8 @@ AmphetamineXL — a macOS menu bar app that prevents Mac sleep when lid is close
 - Repo: `/Users/hannojacobs/Documents/Code/AmphetamineXL`
 - GitHub: https://github.com/HannoJacobs/AmphetamineXL
 - Installed: `/Applications/AmphetamineXL.app`
-- Current release: v2.3.2
-- Current repo state: post-v2.3.2 `main`
+- Current release: v2.3.3
+- Current repo state: v2.3.3 `main`
 
 ## The Problem (solved)
 
