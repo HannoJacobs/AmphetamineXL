@@ -4,12 +4,132 @@ import IOKit.pwr_mgt
 import CoreGraphics
 import SwiftUI
 
+enum WakeMode: String, CaseIterable, Codable {
+    case disabled = "disabled"
+    case autoAwake = "auto-awake"
+    case manual = "manual"
+
+    var manualHoldRequested: Bool {
+        self == .manual
+    }
+
+    var autoWakeEnabled: Bool {
+        self == .autoAwake
+    }
+
+    func menuBarIcon(isWakeStackRunning: Bool) -> String {
+        switch self {
+        case .disabled:
+            return "bolt.slash"
+        case .autoAwake:
+            return "bolt.circle"
+        case .manual:
+            return "bolt.fill"
+        }
+    }
+
+    func autoAwakeMenuBarIcon(hasTaskingActivity: Bool) -> String {
+        hasTaskingActivity ? "bolt.circle.fill" : "bolt.circle"
+    }
+
+    func heroIcon(isWakeStackRunning: Bool) -> String {
+        menuBarIcon(isWakeStackRunning: isWakeStackRunning)
+    }
+
+    func statusTitle(isWakeStackRunning: Bool) -> String {
+        switch self {
+        case .disabled:
+            return "Sleep Allowed"
+        case .autoAwake:
+            return "Auto-awake"
+        case .manual:
+            return "Manual Caffeine"
+        }
+    }
+
+    var controlLabel: String {
+        switch self {
+        case .disabled:
+            return "Disable"
+        case .autoAwake:
+            return "Auto-awake"
+        case .manual:
+            return "Enable"
+        }
+    }
+
+    var descriptionText: String {
+        switch self {
+        case .disabled:
+            return "Sleep behaves normally. No manual hold and no automatic wake triggers."
+        case .autoAwake:
+            return "Wake only when Codex or Claude work is active, then release automatically."
+        case .manual:
+            return "Keep the Mac awake continuously until you switch back to another mode."
+        }
+    }
+
+    var showsAutoAwakeMonitor: Bool {
+        self == .autoAwake
+    }
+
+    func resolvedMenuBarIcon(currentIcon: String, isMenuPresented: Bool, frozenIcon: String?) -> String {
+        if isMenuPresented, let frozenIcon {
+            return frozenIcon
+        }
+
+        return currentIcon
+    }
+}
+
+struct ClosedLidSleepResolver {
+    static func shouldRequestSleep(lidClosed: Bool) -> Bool {
+        lidClosed
+    }
+}
+
+struct AutoAwakeHoldResolver {
+    static func shouldKeepWakeStackEnabled(
+        wakeMode: WakeMode,
+        decision: MonitoredActivityDecision,
+        runtimeStatus: MonitoredRuntimeStatus,
+        hasImmediateTaskingActivity: Bool,
+        lidClosed: Bool
+    ) -> Bool {
+        guard wakeMode == .autoAwake else {
+            return decision.shouldPreventSleep
+        }
+
+        if !lidClosed {
+            return decision.shouldPreventSleep
+        }
+
+        return hasImmediateTaskingActivity
+    }
+}
+
 @Observable
 @MainActor
 final class AppState {
+    private static let wakeModeDefaultsKey = "amphetamine_wake_mode"
+    private static let legacyAutoAwakeDefaultsKey = "amphetamine_auto_awake_enabled"
+    private static let legacyManualDefaultsKey = "amphetamine_active"
+    private static let codexMonitoringDefaultsKey = "amphetamine_monitor_codex_enabled"
+    private static let claudeMonitoringDefaultsKey = "amphetamine_monitor_claude_enabled"
+    private static let activityWindowDefaultsKey = "amphetamine_activity_window_seconds"
+
     private(set) var isActive: Bool = false
     private(set) var activeSince: Date? = nil
     private(set) var durationText: String = "Inactive"
+    private(set) var monitoringStatusText: String = "Monitoring Codex / Claude"
+    private(set) var wakeMode: WakeMode
+    private(set) var isMenuPresented = false
+    private(set) var monitoringSelection: MonitoringSelection
+    private(set) var activityWindowSeconds: Double
+    private(set) var runtimeMonitorStatus = MonitoredRuntimeStatus(
+        codex: .idle,
+        claudeCode: .idle
+    )
 
     private var assertionIDIdleSystem = IOPMAssertionID(0)
     private var assertionIDSystemSleep = IOPMAssertionID(0)
@@ -20,6 +140,7 @@ final class AppState {
     private var keepaliveTimer: Timer?
     private var mouseJiggleTimer: Timer?
     private var lidCheckTimer: Timer?
+    private var monitoredActivityTimer: Timer?
 
     private var caffeinateProcess: Process?
     private var mouseJiggleCount = 0
@@ -27,15 +148,26 @@ final class AppState {
     private var keepaliveCounter = 0
     private var lastJiggleTime: Date?
     private var isDisplayAsleep = false
+    private var isStartingWakeStack = false
     private var isShuttingDownWakeStack = false
+    private var frozenMenuBarIcon: String?
     private var terminationHandled = false
     private var notificationObservers: [NSObjectProtocol] = []
+    private var monitoredHoldRequested = false
+    private var monitoredActivityMonitor = MonitoredActivityMonitor(cooldownInterval: 60)
+    private var monitoredActivityDecision = MonitoredActivityDecision(
+        activeSources: [],
+        shouldPreventSleep: false,
+        isCoolingDown: false,
+        cooldownExpiresAt: nil
+    )
 
     private var sessionState: AppSessionState
 
     private let diagnostics = DiagnosticsLogger.shared
     private let sessionStore = SessionStateStore()
     private let commandRunner = CommandRunner.shared
+    private let monitoredActivityProbe = MonitoredActivityProbe()
     private let keepaliveHosts = [
         "1.1.1.1",
         "8.8.8.8",
@@ -46,22 +178,95 @@ final class AppState {
     private let powerProfileManager: PowerProfileManager
 
     var menuBarIcon: String {
-        // Keep the menu bar item clearly visible even when caffeine is off.
-        isActive ? "bolt.fill" : "bolt.circle"
+        let computedIcon: String
+        if wakeMode == .autoAwake {
+            computedIcon = wakeMode.autoAwakeMenuBarIcon(hasTaskingActivity: hasTaskingActivity)
+        } else {
+            computedIcon = wakeMode.menuBarIcon(isWakeStackRunning: isActive)
+        }
+
+        return wakeMode.resolvedMenuBarIcon(
+            currentIcon: computedIcon,
+            isMenuPresented: isMenuPresented,
+            frozenIcon: frozenMenuBarIcon
+        )
+    }
+
+    var codexRuntimeLabel: String {
+        runtimeMonitorStatus.codex.label
+    }
+
+    var claudeRuntimeLabel: String {
+        runtimeMonitorStatus.claudeCode.label
+    }
+
+    var statusHeroIcon: String {
+        wakeMode.heroIcon(isWakeStackRunning: isActive)
+    }
+
+    var statusTitleText: String {
+        wakeMode.statusTitle(isWakeStackRunning: isActive)
+    }
+
+    var wakeModeDescriptionText: String {
+        wakeMode.descriptionText
+    }
+
+    var showsAutoAwakeMonitor: Bool {
+        wakeMode.showsAutoAwakeMonitor
+    }
+
+    var isCodexMonitoringEnabled: Bool {
+        monitoringSelection.codexEnabled
+    }
+
+    var isClaudeMonitoringEnabled: Bool {
+        monitoringSelection.claudeEnabled
+    }
+
+    var activityWindowLabelText: String {
+        "Activity Window: \(Int(activityWindowSeconds))s"
+    }
+
+    var hasTaskingActivity: Bool {
+        runtimeMonitorStatus.codex == .tasking
+            || runtimeMonitorStatus.codex == .taskingAndQueued
+            || runtimeMonitorStatus.claudeCode == .tasking
+            || runtimeMonitorStatus.claudeCode == .taskingAndQueued
     }
 
     init() {
         let previousState = sessionStore.load()
-        let hasSetPref = UserDefaults.standard.object(forKey: "amphetamine_active") != nil
-        let savedDesiredState = hasSetPref ? UserDefaults.standard.bool(forKey: "amphetamine_active") : true
+        let storedWakeMode = UserDefaults.standard.string(forKey: Self.wakeModeDefaultsKey).flatMap(WakeMode.init(rawValue:))
+        let hasSetPref = UserDefaults.standard.object(forKey: Self.legacyManualDefaultsKey) != nil
+        let savedDesiredState = hasSetPref ? UserDefaults.standard.bool(forKey: Self.legacyManualDefaultsKey) : true
+        let hasAutoAwakePref = UserDefaults.standard.object(forKey: Self.legacyAutoAwakeDefaultsKey) != nil
+        let savedAutoAwake = hasAutoAwakePref ? UserDefaults.standard.bool(forKey: Self.legacyAutoAwakeDefaultsKey) : true
         let persistedWakeProfile = UserDefaults.standard.string(forKey: WakeProfile.defaultsKey)
         let resolvedProfile = WakeProfile.resolved()
         let newSessionID = UUID().uuidString
+        let codexMonitoringEnabled = UserDefaults.standard.object(forKey: Self.codexMonitoringDefaultsKey) as? Bool ?? true
+        let claudeMonitoringEnabled = UserDefaults.standard.object(forKey: Self.claudeMonitoringDefaultsKey) as? Bool ?? true
+        let storedActivityWindow = UserDefaults.standard.object(forKey: Self.activityWindowDefaultsKey) as? Double
+        let resolvedWakeMode = storedWakeMode ?? Self.migratedWakeMode(
+            savedDesiredState: savedDesiredState,
+            savedAutoAwake: savedAutoAwake,
+            hasLegacyManualPref: hasSetPref,
+            hasLegacyAutoPref: hasAutoAwakePref
+        )
+        wakeMode = resolvedWakeMode
+        monitoringSelection = MonitoringSelection(
+            codexEnabled: codexMonitoringEnabled,
+            claudeEnabled: claudeMonitoringEnabled
+        )
+        activityWindowSeconds = ActivityWindowSettings.normalize(
+            storedActivityWindow ?? ActivityWindowSettings.defaultSeconds
+        )
 
         sessionState = AppSessionState(
             sessionID: newSessionID,
             profile: resolvedProfile,
-            desiredActiveOnLaunch: savedDesiredState,
+            desiredActiveOnLaunch: resolvedWakeMode.manualHoldRequested,
             shutdownClean: false,
             caffeinatePID: nil,
             ownedPmsetKeys: [],
@@ -78,8 +283,9 @@ final class AppState {
 
         diagnostics.notice("AmphetamineXL initializing version=\(currentAppVersion()) build=\(currentBuildVersion()) pid=\(ProcessInfo.processInfo.processIdentifier)")
         diagnostics.notice(
-            "Launch settings: desiredActiveOnLaunch=\(savedDesiredState) " +
-            "hasLegacyUserDefault=\(hasSetPref) wakeProfile=\(resolvedProfile.rawValue) " +
+            "Launch settings: wakeMode=\(resolvedWakeMode.rawValue) desiredActiveOnLaunch=\(resolvedWakeMode.manualHoldRequested) " +
+            "hasLegacyUserDefault=\(hasSetPref) autoAwakeEnabled=\(savedAutoAwake) " +
+            "wakeProfile=\(resolvedProfile.rawValue) " +
             "persistedWakeProfileIgnored=\(persistedWakeProfile ?? "nil")"
         )
         diagnostics.notice("Active mode is max-awake only; normal runtime uses \(WakeProfile.activeRuntimeDefault.rawValue)")
@@ -98,20 +304,83 @@ final class AppState {
         diagnostics.notice("Initial lid state closed=\(isDisplayAsleep)")
         persistSessionState()
         captureStartupDiagnostics(stage: "post-recovery", previousState: previousState)
-
-        if savedDesiredState {
-            enableCaffeine()
-        } else {
-            updateDurationText()
-        }
+        updateMonitoringStatusText()
+        startMonitoredActivityTimer()
+        refreshMonitoredActivityAsync(reason: "launch")
+        reconcileWakeStack(reason: "launch")
     }
 
-    func toggle() {
-        if isActive {
-            disableCaffeine()
-        } else {
-            enableCaffeine()
+    private static func migratedWakeMode(
+        savedDesiredState: Bool,
+        savedAutoAwake: Bool,
+        hasLegacyManualPref: Bool,
+        hasLegacyAutoPref: Bool
+    ) -> WakeMode {
+        if hasLegacyManualPref {
+            return savedDesiredState ? .manual : (savedAutoAwake ? .autoAwake : .disabled)
         }
+
+        if hasLegacyAutoPref {
+            return savedAutoAwake ? .autoAwake : .disabled
+        }
+
+        return .manual
+    }
+
+    func setWakeMode(_ newMode: WakeMode) {
+        guard wakeMode != newMode else {
+            return
+        }
+
+        wakeMode = newMode
+        UserDefaults.standard.set(newMode.rawValue, forKey: Self.wakeModeDefaultsKey)
+        UserDefaults.standard.set(newMode.manualHoldRequested, forKey: Self.legacyManualDefaultsKey)
+        UserDefaults.standard.set(newMode.autoWakeEnabled, forKey: Self.legacyAutoAwakeDefaultsKey)
+        diagnostics.notice("User selected wake mode \(newMode.rawValue)")
+        sessionState.desiredActiveOnLaunch = newMode.manualHoldRequested
+        monitoredHoldRequested = newMode.autoWakeEnabled && monitoredActivityDecision.shouldPreventSleep
+        persistSessionState()
+        updateMonitoringStatusText()
+        reconcileWakeStack(reason: "wake-mode-change")
+    }
+
+    func menuDidAppear() {
+        isMenuPresented = true
+        frozenMenuBarIcon = menuBarIcon
+    }
+
+    func menuDidDisappear() {
+        isMenuPresented = false
+        frozenMenuBarIcon = nil
+    }
+
+    func setCodexMonitoringEnabled(_ enabled: Bool) {
+        monitoringSelection = MonitoringSelection(
+            codexEnabled: enabled,
+            claudeEnabled: monitoringSelection.claudeEnabled
+        )
+        UserDefaults.standard.set(enabled, forKey: Self.codexMonitoringDefaultsKey)
+        refreshMonitoringAfterSelectionChange(reason: "codex-monitor-toggle")
+    }
+
+    func setClaudeMonitoringEnabled(_ enabled: Bool) {
+        monitoringSelection = MonitoringSelection(
+            codexEnabled: monitoringSelection.codexEnabled,
+            claudeEnabled: enabled
+        )
+        UserDefaults.standard.set(enabled, forKey: Self.claudeMonitoringDefaultsKey)
+        refreshMonitoringAfterSelectionChange(reason: "claude-monitor-toggle")
+    }
+
+    func setActivityWindowSeconds(_ seconds: Double) {
+        let normalized = ActivityWindowSettings.normalize(seconds)
+        guard activityWindowSeconds != normalized else {
+            return
+        }
+
+        activityWindowSeconds = normalized
+        UserDefaults.standard.set(normalized, forKey: Self.activityWindowDefaultsKey)
+        refreshMonitoringAfterSelectionChange(reason: "activity-window-change")
     }
 
     func prepareForQuit() {
@@ -158,19 +427,23 @@ final class AppState {
         diagnostics.openCurrentLogInFinder()
     }
 
-    func enableCaffeine() {
+    private func startWakeStack() {
         guard !isActive else {
-            diagnostics.notice("enableCaffeine ignored because the wake stack is already active")
+            diagnostics.notice("startWakeStack ignored because the wake stack is already active")
+            return
+        }
+
+        guard !isStartingWakeStack else {
+            diagnostics.notice("startWakeStack ignored because startup is already in progress")
             return
         }
 
         let activeProfile = WakeProfile.resolved()
+        isStartingWakeStack = true
         isShuttingDownWakeStack = false
         sessionState.profile = activeProfile
-        sessionState.desiredActiveOnLaunch = true
         sessionState.shutdownClean = false
         sessionState.lastShutdownReason = nil
-        UserDefaults.standard.set(true, forKey: "amphetamine_active")
 
         diagnostics.notice("Enabling wake stack with profile \(sessionState.profile.rawValue)")
         diagnostics.notice("Active mode is max-awake only; applying \(activeProfile.rawValue) for this session")
@@ -223,11 +496,8 @@ final class AppState {
         persistSessionState()
         diagnostics.notice("Wake stack enabled successfully")
         emitHeartbeat(reason: "post-enable")
-    }
-
-    func disableCaffeine() {
-        diagnostics.notice("User requested wake stack disable")
-        shutdown(reason: .toggleOff, desiredActiveOverride: false)
+        isStartingWakeStack = false
+        reconcileWakeStack(reason: "post-start")
     }
 
     private func shutdown(reason: ShutdownReason, desiredActiveOverride: Bool?) {
@@ -251,6 +521,7 @@ final class AppState {
         stopLidCheck()
         stopDurationTimer()
         stopHeartbeatTimer()
+        stopMonitoredActivityTimer()
         stopCaffeinate()
         powerProfileManager.restore(sessionState: &sessionState, reason: reason)
 
@@ -264,6 +535,68 @@ final class AppState {
 
         diagnostics.notice("Wake stack shutdown complete reason=\(reason.rawValue)")
         isShuttingDownWakeStack = false
+        requestImmediateSleepIfNeeded(reason: reason)
+    }
+
+    private func stopWakeStack(reason: ShutdownReason) {
+        guard isActive else {
+            diagnostics.notice("stopWakeStack ignored because the wake stack is already inactive reason=\(reason.rawValue)")
+            return
+        }
+
+        if isShuttingDownWakeStack {
+            diagnostics.notice("stopWakeStack ignored because shutdown is already in progress reason=\(reason.rawValue)")
+            return
+        }
+
+        isShuttingDownWakeStack = true
+        diagnostics.notice("Shutting down wake stack reason=\(reason.rawValue) active=\(isActive)")
+        diagnostics.trace("shutdown start reason=\(reason.rawValue)")
+
+        releaseSystemAssertions()
+        stopMouseJiggle()
+        stopKeepalive()
+        stopLidCheck()
+        stopDurationTimer()
+        stopHeartbeatTimer()
+        stopCaffeinate()
+        powerProfileManager.restore(sessionState: &sessionState, reason: reason)
+
+        isActive = false
+        activeSince = nil
+        durationText = "Inactive"
+        sessionState.shutdownClean = true
+        sessionState.lastShutdownReason = reason
+        sessionState.lastKnownLidState = isDisplayAsleep
+        persistSessionState()
+
+        diagnostics.notice("Wake stack shutdown complete reason=\(reason.rawValue)")
+        isShuttingDownWakeStack = false
+        requestImmediateSleepIfNeeded(reason: reason)
+        reconcileWakeStack(reason: "post-stop", stopReason: reason)
+    }
+
+    private func reconcileWakeStack(reason: String, stopReason: ShutdownReason = .automaticMonitorIdle) {
+        let decision = WakeDemandResolver.resolve(
+            manualHoldRequested: wakeMode.manualHoldRequested,
+            autoHoldRequested: monitoredHoldRequested,
+            isAutoWakeEnabled: wakeMode.autoWakeEnabled,
+            isWakeStackRunning: isActive,
+            isWakeStackTransitioning: isStartingWakeStack || isShuttingDownWakeStack
+        )
+
+        diagnostics.notice(
+            "Reconciling wake stack reason=\(reason) mode=\(wakeMode.rawValue) auto=\(monitoredHoldRequested) " +
+            "running=\(isActive) start=\(decision.shouldStartWakeStack) stop=\(decision.shouldStopWakeStack)"
+        )
+
+        if decision.shouldStartWakeStack {
+            startWakeStack()
+        } else if decision.shouldStopWakeStack {
+            stopWakeStack(reason: stopReason)
+        } else {
+            updateDurationText()
+        }
     }
 
     private func persistSessionState() {
@@ -576,6 +909,32 @@ final class AppState {
         releaseDisplayAssertion()
     }
 
+    private func requestImmediateSleepIfNeeded(reason: ShutdownReason) {
+        let lidClosed = isLidClosed() || isDisplayAsleep
+        guard ClosedLidSleepResolver.shouldRequestSleep(lidClosed: lidClosed) else {
+            return
+        }
+
+        diagnostics.notice("Wake stack stopped while lid is closed; requesting immediate sleep reason=\(reason.rawValue)")
+        DispatchQueue.global(qos: .utility).async { [commandRunner, diagnostics] in
+            do {
+                let result = try commandRunner.run(
+                    "/usr/bin/sudo",
+                    arguments: ["-n", "/usr/bin/pmset", "sleepnow"]
+                )
+                diagnostics.notice("[pmset] request immediate sleep -> exit \(result.terminationStatus) :: \(result.renderedCommand)")
+                if !result.stdout.isEmpty {
+                    diagnostics.logMultiline(.notice, title: "pmset sleepnow stdout", body: result.stdout)
+                }
+                if !result.stderr.isEmpty {
+                    diagnostics.logMultiline(.warning, title: "pmset sleepnow stderr", body: result.stderr)
+                }
+            } catch {
+                diagnostics.warning("Failed to request immediate sleep after wake stack stop: \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func startCaffeinate() {
         stopCaffeinate()
 
@@ -765,6 +1124,117 @@ final class AppState {
     private func stopHeartbeatTimer() {
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
+    }
+
+    private func startMonitoredActivityTimer() {
+        stopMonitoredActivityTimer()
+        let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshMonitoredActivityAsync(reason: "timer")
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        monitoredActivityTimer = timer
+    }
+
+    private func stopMonitoredActivityTimer() {
+        monitoredActivityTimer?.invalidate()
+        monitoredActivityTimer = nil
+    }
+
+    private func refreshMonitoredActivityAsync(reason: String) {
+        let probe = monitoredActivityProbe
+        let activityWindow = activityWindowSeconds
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let snapshot = probe.snapshot(activityWindow: activityWindow)
+            Task { @MainActor [weak self] in
+                self?.applyMonitoredActivitySnapshot(snapshot, reason: reason)
+            }
+        }
+    }
+
+    private func applyMonitoredActivitySnapshot(_ snapshot: MonitoredActivitySnapshot, reason: String) {
+        let decision = monitoredActivityMonitor.update(
+            snapshot: snapshot,
+            now: Date(),
+            selection: monitoringSelection
+        )
+        let previousDecision = monitoredActivityDecision
+
+        monitoredActivityDecision = decision
+        runtimeMonitorStatus = MonitoredActivityMonitor.runtimeStatus(
+            in: snapshot,
+            selection: monitoringSelection
+        )
+        monitoredHoldRequested = AutoAwakeHoldResolver.shouldKeepWakeStackEnabled(
+            wakeMode: wakeMode,
+            decision: decision,
+            runtimeStatus: runtimeMonitorStatus,
+            hasImmediateTaskingActivity: MonitoredActivityMonitor.hasImmediateTaskingActivity(
+                in: snapshot,
+                selection: monitoringSelection
+            ),
+            lidClosed: isDisplayAsleep || isLidClosed()
+        )
+        updateMonitoringStatusText()
+
+        let stateChanged = previousDecision.shouldPreventSleep != decision.shouldPreventSleep
+            || previousDecision.isCoolingDown != decision.isCoolingDown
+            || previousDecision.activeSources != decision.activeSources
+
+        if stateChanged {
+            let sources = decision.activeSources
+                .map(\.displayName)
+                .sorted()
+                .joined(separator: ", ")
+            diagnostics.notice(
+                "Monitored activity changed reason=\(reason) activeSources=[\(sources)] " +
+                "hold=\(decision.shouldPreventSleep) cooldown=\(decision.isCoolingDown) " +
+                "queuedCodexFollowUps=\(snapshot.codexQueuedFollowUpCount) claudeTodos=\(snapshot.claudeTodoTaskCount)"
+            )
+        }
+
+        reconcileWakeStack(reason: "monitor-\(reason)")
+    }
+
+    private func refreshMonitoringAfterSelectionChange(reason: String) {
+        refreshMonitoredActivityAsync(reason: reason)
+        updateMonitoringStatusText()
+        reconcileWakeStack(reason: reason)
+    }
+
+    private func updateMonitoringStatusText() {
+        if wakeMode == .disabled {
+            monitoringStatusText = "Mode: Disabled"
+            return
+        }
+
+        if wakeMode == .manual {
+            monitoringStatusText = "Mode: Manual"
+            return
+        }
+
+        if !monitoringSelection.codexEnabled && !monitoringSelection.claudeEnabled {
+            monitoringStatusText = "Auto-awake monitoring off"
+            return
+        }
+
+        if monitoredActivityDecision.isCoolingDown, let expiresAt = monitoredActivityDecision.cooldownExpiresAt {
+            let remaining = max(0, Int(expiresAt.timeIntervalSinceNow.rounded(.up)))
+            monitoringStatusText = "Auto-awake cooldown: \(remaining)s"
+            return
+        }
+
+        if monitoredActivityDecision.activeSources.isEmpty {
+            monitoringStatusText = "Auto-awake ready"
+            return
+        }
+
+        let labels = monitoredActivityDecision.activeSources
+            .map(\.displayName)
+            .sorted()
+            .joined(separator: ", ")
+        monitoringStatusText = "Auto-awake: \(labels)"
     }
 
     private func emitHeartbeat(reason: String) {

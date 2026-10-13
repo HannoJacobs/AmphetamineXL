@@ -18,5 +18,10 @@ let package = Package(
             ],
             path: "Sources/AmphetamineXL"
         ),
+        .testTarget(
+            name: "AmphetamineXLTests",
+            dependencies: ["AmphetamineXL"],
+            path: "Tests/AmphetamineXLTests"
+        ),
     ]
 )

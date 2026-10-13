@@ -19,6 +19,7 @@ AmphetamineXL solves this by posting synthetic mouse events via `CGEventCreateMo
 | 🌐 Network keepalive (3s) | 5 DNS targets, keeps hotspot/Wi-Fi alive |
 | ☕ caffeinate + IOKit | Kernel + OS level sleep prevention |
 | 🧠 Smart lid detection | Only activates defense when lid is actually closed |
+| 🤖 Tool-aware auto-awake | Keeps the Mac awake while Codex / Claude work is still active |
 
 ## Install (DMG)
 
@@ -65,9 +66,23 @@ pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20
 - **Caffeine ON** = aggressive max-awake machine state while the app is active
 - **Caffeine OFF** = app stays resident, but your normal sleep-capable machine settings are restored
 - Click to toggle. Optional: enable "Launch at Login"
+- Even with manual caffeine off, AmphetamineXL can now keep the Mac awake automatically while monitored Codex / Claude work is still active
+- After monitored work finishes, the app keeps the wake stack alive for 60 more seconds before releasing it
 
 **Lid closed:** screen locks → display off → mouse jiggle active → Mac stays awake
 **Lid open:** no jiggle interference, but the active max-awake `pmset` profile is still held until you disable caffeine or quit the app
+
+### Monitored tools
+
+Automatic wake monitoring currently checks local runtime state for:
+
+- `Codex.app`
+- `codex` CLI processes
+- Codex queued follow-ups from `~/.codex/.codex-global-state.json`
+- `claude` / Claude Code sessions from `~/.claude/sessions`
+- Claude todo payloads from `~/.claude/todos`
+
+This means the app can hold the wake stack for active Codex / Claude work even when manual caffeine is off, then release it after the 60-second cooldown.
 
 ## Recovery + Rollback
 
