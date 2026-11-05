@@ -1,8 +1,10 @@
 # AmphetamineXL — Claude Code Briefing
 
-## GitHub Actions
+## Local builds, no GitHub Actions
 
-We no longer use GitHub Actions on Hanno's personal projects. Do not add workflows or use Actions for new work, and run tests locally, reporting what you actually ran. The existing `release.yml` still runs on pushes to `main` because public repos are free on standard runners; leave it as it is unless Hanno retires it. Never use paid or larger runners, and never make this repo private with Actions enabled.
+We don't use GitHub Actions on Hanno's personal projects. There are no workflows here and nothing builds when you push. Do not add a workflow or use Actions. GitHub Pages still publishes `docs/` by itself.
+
+Before you push to `main`, run `./scripts/release.sh --no-upload` on the Mac. It builds the app and DMG in a throwaway copy of your working tree. To release, run `./scripts/release.sh` after pushing: it needs a clean checkout at `origin/main` and uploads the DMG to the latest GitHub release. Report what you ran.
 
 macOS menu bar app that prevents Apple Silicon clamshell sleep. Swift SPM, macOS 14+, no Xcode project files. Hanno never opens Xcode — all work is done by agents via CLI.
 
@@ -84,7 +86,7 @@ pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20
 3. Update ALL docs that reference version/features (`README.md`, `HANDOFF.md`, `CLAUDE.md`, `AGENTS.md`, `docs/index.html`, `docs/ARCHITECTURE.md`)
 4. Commit: `git add -A && git commit -m "vX.Y: <description>"`
 5. Create release BEFORE push: `gh release create vX.Y --title "vX.Y — <title>" --notes "..."`
-6. Push: `git push origin main`
+6. Push, then upload the DMG: `git push origin main && ./scripts/release.sh`
 7. Deploy locally (see above) + bump Info.plist via PlistBuddy
 8. Verify: `pgrep -x AmphetamineXL` + `gh release view vX.Y`
 
@@ -92,5 +94,5 @@ pmset -g log | grep -E "Sleep|Wake|Clamshell" | tail -20
 
 - **Never remove mouse jiggle** — only thing that prevents clamshell sleep
 - **Use `onTapGesture` not `Button`** in MenuBarExtra .window views
-- **Create GitHub release BEFORE pushing** (CI uploads DMG to latest)
+- **Create the GitHub release BEFORE running `scripts/release.sh`** (it uploads the DMG to the latest release)
 - **Version lives in `create-dmg.sh`** only

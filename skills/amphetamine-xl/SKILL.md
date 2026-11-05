@@ -31,7 +31,7 @@ Read `AGENTS.md` in the repo root for the full sequence. Short version:
 2. Update `CHANGELOG.md`
 3. Commit all changes
 4. `gh release create vX.Y --title "vX.Y — <title>" --notes "..."`
-5. `git push` (CI builds DMG + uploads to release)
+5. `git push && ./scripts/release.sh` (builds the DMG and uploads it to the release)
 6. Install locally: find binary in DerivedData → kill old → cp to `/Applications/AmphetamineXL.app/Contents/MacOS/` → update plist → `open /Applications/AmphetamineXL.app`
 
 ## Check app is running

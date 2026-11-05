@@ -1,8 +1,10 @@
 # AmphetamineXL — Agent Briefing
 
-## GitHub Actions
+## Local builds, no GitHub Actions
 
-We no longer use GitHub Actions on Hanno's personal projects. Do not add workflows or use Actions for new work, and run tests locally, reporting what you actually ran. The existing `release.yml` still runs on pushes to `main` because public repos are free on standard runners; leave it as it is unless Hanno retires it. Never use paid or larger runners, and never make this repo private with Actions enabled.
+We don't use GitHub Actions on Hanno's personal projects. There are no workflows here and nothing builds when you push. Do not add a workflow or use Actions. GitHub Pages still publishes `docs/` by itself.
+
+Before you push to `main`, run `./scripts/release.sh --no-upload` on the Mac. It builds the app and DMG in a throwaway copy of your working tree. To release, run `./scripts/release.sh` after pushing: it needs a clean checkout at `origin/main` and uploads the DMG to the latest GitHub release. Report what you ran.
 
 This repo is maintained entirely by agents. Hanno never opens Xcode. Read this before touching anything.
 
@@ -89,7 +91,7 @@ AmphetamineXL/
 │   ├── index.html                         # Landing page (GitHub Pages) — has all install/debug commands
 │   ├── ARCHITECTURE.md                    # Technical deep-dive
 │   └── CONTRIBUTING.md                    # Agent contribution guide
-├── .github/workflows/release.yml          # CI: builds on push to main, uploads DMG to latest release
+├── scripts/release.sh                     # Local build, DMG and upload to the latest release
 ├── AGENTS.md                              # This file
 ├── CLAUDE.md                              # Claude Code variant of this briefing
 ├── HANDOFF.md                             # Session handoff document
@@ -153,10 +155,11 @@ git add -A && git commit -m "vX.Y: <short description>"
 gh release create vX.Y --title "vX.Y — <title>" --notes "..."
 ```
 
-### Step 6 — Push to main (triggers CI)
+### Step 6 — Push to main, then upload the DMG
 
 ```bash
 git push origin main
+./scripts/release.sh
 ```
 
 ### Step 7 — Install locally (see deploy section above)
@@ -243,7 +246,7 @@ pmset -g | grep -E "standby|hibernatemode|autopoweroff"
 
 - **Never remove the mouse jiggle** — it's the ONLY thing that prevents clamshell sleep on Apple Silicon
 - **Never create `.xcodeproj`** — SPM only
-- **Always create GitHub release BEFORE pushing** — CI uploads DMG to latest release
+- **Always create the GitHub release BEFORE running `scripts/release.sh`** — it uploads the DMG to the latest release
 - **Always verify with `pgrep` after deploy** — don't mark done without it
 - **Version lives in `create-dmg.sh`** only (not Package.swift)
 - **Use `onTapGesture` not `Button`** in MenuBarExtra window views

@@ -23,7 +23,7 @@ This repo is agent-operated. Hanno doesn't open Xcode. All changes are made via 
 - **Use `onTapGesture` not `Button`** in MenuBarExtra `.window` views (Button dismisses the popup)
 - **`@Observable` not `ObservableObject`** (macOS 14+)
 - **Version lives in `create-dmg.sh`** — the inline Info.plist, not Package.swift
-- **Create GitHub release BEFORE pushing** — CI uploads DMG to latest release
+- **Create the GitHub release BEFORE running `scripts/release.sh`** — it uploads the DMG to the latest release
 
 ## Architecture quick ref
 
