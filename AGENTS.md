@@ -1,5 +1,9 @@
 # AmphetamineXL — Agent Briefing
 
+## GitHub Actions
+
+We no longer use GitHub Actions on Hanno's personal projects. Do not add workflows or use Actions for new work, and run tests locally, reporting what you actually ran. The existing `release.yml` still runs on pushes to `main` because public repos are free on standard runners; leave it as it is unless Hanno retires it. Never use paid or larger runners, and never make this repo private with Actions enabled.
+
 This repo is maintained entirely by agents. Hanno never opens Xcode. Read this before touching anything.
 
 ---
