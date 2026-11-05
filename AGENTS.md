@@ -4,7 +4,7 @@
 
 We don't use GitHub Actions on Hanno's personal projects. There are no workflows here and nothing builds when you push. Do not add a workflow or use Actions. GitHub Pages still publishes `docs/` by itself.
 
-Before you push to `main`, run `./scripts/release.sh --no-upload` on the Mac. It builds the app and DMG in a throwaway copy of your working tree. To release, run `./scripts/release.sh` after pushing: it needs a clean checkout at `origin/main` and uploads the DMG to the latest GitHub release. Report what you ran.
+Before you push to `main`, run `./scripts/release.sh --no-upload` on the Mac. It builds the app and DMG in a throwaway copy of your working tree. To release, run `./scripts/release.sh` after pushing: it needs a clean checkout at `origin/main` and uploads the DMG to the latest GitHub release. It replaces the public download, so run it only for a real release. Run it in a normal Mac terminal, because plain SSH has no GitHub login and background jobs cannot read `~/Documents`. Report what you ran.
 
 This repo is maintained entirely by agents. Hanno never opens Xcode. Read this before touching anything.
 
