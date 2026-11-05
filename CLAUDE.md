@@ -1,5 +1,9 @@
 # AmphetamineXL — Claude Code Briefing
 
+## GitHub Actions
+
+We no longer use GitHub Actions on Hanno's personal projects. Do not add workflows or use Actions for new work, and run tests locally, reporting what you actually ran. The existing `release.yml` still runs on pushes to `main` because public repos are free on standard runners; leave it as it is unless Hanno retires it. Never use paid or larger runners, and never make this repo private with Actions enabled.
+
 macOS menu bar app that prevents Apple Silicon clamshell sleep. Swift SPM, macOS 14+, no Xcode project files. Hanno never opens Xcode — all work is done by agents via CLI.
 
 Full briefing: see `AGENTS.md`. This file is the concise session-start reference.
